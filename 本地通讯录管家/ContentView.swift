@@ -1,61 +1,48 @@
-//
-//  ContentView.swift
-//  本地通讯录管家
-//
-//  Created by Peishen Li on 2026/3/20.
-//
-
 import SwiftUI
-import SwiftData
 
 struct ContentView: View {
-    @Environment(\.modelContext) private var modelContext
-    @Query private var items: [Item]
+    @EnvironmentObject var appVM: AppViewModel
+    @State private var selectedTab = 0
 
     var body: some View {
-        NavigationSplitView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))")
-                    } label: {
-                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
+        NavigationStack {
+            TabView(selection: $selectedTab) {
+                HomeView(appVM: appVM)
+                    .tabItem {
+                        Label("概览", systemImage: "house.fill")
                     }
-                }
-                .onDelete(perform: deleteItems)
-            }
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    EditButton()
-                }
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
+                    .tag(0)
+
+                CleanupView(appVM: appVM)
+                    .tabItem {
+                        Label("整理", systemImage: "wand.and.stars")
                     }
-                }
-            }
-        } detail: {
-            Text("Select an item")
-        }
-    }
+                    .tag(1)
 
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(timestamp: Date())
-            modelContext.insert(newItem)
-        }
-    }
+                ImportView(appVM: appVM)
+                    .tabItem {
+                        Label("导入", systemImage: "square.and.arrow.down")
+                    }
+                    .tag(2)
 
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            for index in offsets {
-                modelContext.delete(items[index])
+                ExportView(appVM: appVM)
+                    .tabItem {
+                        Label("导出", systemImage: "square.and.arrow.up")
+                    }
+                    .tag(3)
+
+                SettingsView()
+                    .tabItem {
+                        Label("设置", systemImage: "gearshape.fill")
+                    }
+                    .tag(4)
             }
+            .tint(.blue)
         }
     }
 }
 
 #Preview {
     ContentView()
-        .modelContainer(for: Item.self, inMemory: true)
+        .environmentObject(AppViewModel())
 }

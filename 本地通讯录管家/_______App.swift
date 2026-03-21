@@ -1,32 +1,16 @@
-//
-//  _______App.swift
-//  本地通讯录管家
-//
-//  Created by Peishen Li on 2026/3/20.
-//
-
 import SwiftUI
-import SwiftData
 
 @main
 struct _______App: App {
-    var sharedModelContainer: ModelContainer = {
-        let schema = Schema([
-            Item.self,
-        ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-
-        do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
-        } catch {
-            fatalError("Could not create ModelContainer: \(error)")
-        }
-    }()
+    @StateObject private var appVM = AppViewModel()
 
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environmentObject(appVM)
+                .onAppear {
+                    appVM.checkAuthorization()
+                }
         }
-        .modelContainer(sharedModelContainer)
     }
 }

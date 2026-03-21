@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1024" height="1024" fill="#ffffff"/>
+  <g transform="translate(256, 256) scale(0.5)">
+    <circle cx="512" cy="450" r="180" fill="#3b82f6"/>
+    <path d="M512 630c-99.4 0-180-80.6-180-180s80.6-180 180-180 180 80.6 180 180-80.6 180-180 180z" fill="#ffffff"/>
+    <circle cx="512" cy="450" r="60" fill="#3b82f6"/>
+    <path d="M380 600c-11 0-20-9-20-20v-120c0-11 9-20 20-20h264c11 0 20 9 20 20v120c0 11-9 20-20 20H380z" fill="#3b82f6"/>
+    <path d="M620 520l-108 108-44-44-84 84-40-40 124-124z" fill="#ffffff"/>
+  </g>
+</svg>
