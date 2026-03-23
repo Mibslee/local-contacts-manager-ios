@@ -71,6 +71,7 @@ struct SettingsView: View {
                     .listRowBackground(Color.clear)
                 }
             }
+            .accessibilityIdentifier("tab.settings.root")
             .navigationTitle("设置")
         }
     }

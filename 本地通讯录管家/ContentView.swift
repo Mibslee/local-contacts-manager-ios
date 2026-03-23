@@ -7,35 +7,29 @@ struct ContentView: View {
     var body: some View {
         NavigationStack {
             TabView(selection: $selectedTab) {
-                HomeView(appVM: appVM)
+                OptimizedHomeView(appVM: appVM)
                     .tabItem {
                         Label("概览", systemImage: "house.fill")
                     }
                     .tag(0)
 
-                CleanupView(appVM: appVM)
-                    .tabItem {
-                        Label("整理", systemImage: "wand.and.stars")
-                    }
-                    .tag(1)
-
                 ImportView(appVM: appVM)
                     .tabItem {
                         Label("导入", systemImage: "square.and.arrow.down")
                     }
-                    .tag(2)
+                    .tag(1)
 
                 ExportView(appVM: appVM)
                     .tabItem {
                         Label("导出", systemImage: "square.and.arrow.up")
                     }
-                    .tag(3)
+                    .tag(2)
 
                 SettingsView()
                     .tabItem {
                         Label("设置", systemImage: "gearshape.fill")
                     }
-                    .tag(4)
+                    .tag(3)
             }
             .tint(.blue)
         }

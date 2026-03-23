@@ -9,33 +9,55 @@ class ContactDeduplicator {
         var isSelected: Bool = true
     }
 
-    static func findDuplicates(in contacts: [ContactItem]) -> [DuplicateGroup] {
+    nonisolated static func findDuplicates(in contacts: [ContactItem]) -> [DuplicateGroup] {
         var groups: [DuplicateGroup] = []
         var processed = Set<String>()
-
-        for (i, contact) in contacts.enumerated() {
-            guard !processed.contains(contact.id) else { continue }
-
-            var duplicates: [ContactItem] = [contact]
-
-            for (j, other) in contacts.enumerated() where j != i && !processed.contains(other.id) {
-                if areSimilar(contact, other) {
-                    duplicates.append(other)
-                    processed.insert(other.id)
+        
+        // 使用字典按姓名分组，提高性能
+        var nameGroups: [String: [ContactItem]] = [:]
+        
+        for contact in contacts {
+            let normalizedName = contact.fullName.replacingOccurrences(of: " ", with: "").lowercased()
+            if !normalizedName.isEmpty {
+                nameGroups[normalizedName, default: []].append(contact)
+            }
+        }
+        
+        // 处理按姓名分组的联系人
+        for (_, nameGroup) in nameGroups {
+            if nameGroup.count > 1 {
+                // 进一步检查是否有相同的联系方式
+                var similarGroups: [DuplicateGroup] = []
+                var groupProcessed = Set<String>()
+                
+                for (i, contact) in nameGroup.enumerated() {
+                    guard !groupProcessed.contains(contact.id) && !processed.contains(contact.id) else { continue }
+                    
+                    var duplicates: [ContactItem] = [contact]
+                    
+                    for (j, other) in nameGroup.enumerated() where j != i && !groupProcessed.contains(other.id) && !processed.contains(other.id) {
+                        if areSimilar(contact, other) {
+                            duplicates.append(other)
+                            groupProcessed.insert(other.id)
+                            processed.insert(other.id)
+                        }
+                    }
+                    
+                    if duplicates.count > 1 {
+                        similarGroups.append(DuplicateGroup(contacts: duplicates, reason: detectReason(duplicates)))
+                    }
+                    
+                    processed.insert(contact.id)
                 }
+                
+                groups.append(contentsOf: similarGroups)
             }
-
-            if duplicates.count > 1 {
-                groups.append(DuplicateGroup(contacts: duplicates, reason: detectReason(duplicates)))
-            }
-
-            processed.insert(contact.id)
         }
 
         return groups
     }
 
-    static func findDuplicatePhones(in contacts: [ContactItem]) -> [(phone: String, contacts: [ContactItem])] {
+    nonisolated static func findDuplicatePhones(in contacts: [ContactItem]) -> [(phone: String, contacts: [ContactItem])] {
         var phoneMap: [String: [ContactItem]] = [:]
 
         for contact in contacts {
@@ -49,7 +71,7 @@ class ContactDeduplicator {
             .map { (phone: $0.key, contacts: $0.value) }
     }
 
-    static func findDuplicateEmails(in contacts: [ContactItem]) -> [(email: String, contacts: [ContactItem])] {
+    nonisolated static func findDuplicateEmails(in contacts: [ContactItem]) -> [(email: String, contacts: [ContactItem])] {
         var emailMap: [String: [ContactItem]] = [:]
 
         for contact in contacts {
@@ -63,7 +85,7 @@ class ContactDeduplicator {
             .map { (email: $0.key, contacts: $0.value) }
     }
 
-    static func findDuplicatePhonesInContact(_ contact: ContactItem) -> [String] {
+    nonisolated static func findDuplicatePhonesInContact(_ contact: ContactItem) -> [String] {
         var seen: [String: Int] = [:]
         var duplicates: [String] = []
 
@@ -79,7 +101,7 @@ class ContactDeduplicator {
         return duplicates
     }
 
-    static func findDuplicateEmailsInContact(_ contact: ContactItem) -> [String] {
+    nonisolated static func findDuplicateEmailsInContact(_ contact: ContactItem) -> [String] {
         var seen: Set<String> = []
         var duplicates: [String] = []
 
@@ -95,7 +117,7 @@ class ContactDeduplicator {
         return duplicates
     }
 
-    static func mergeContacts(_ contacts: [ContactItem], strategy: MergeStrategy = .keepMoreInfo) -> ContactItem {
+    nonisolated static func mergeContacts(_ contacts: [ContactItem], strategy: MergeStrategy = .keepMoreInfo) -> ContactItem {
         guard let primary = contacts.first else {
             fatalError("Cannot merge empty contacts")
         }
@@ -140,7 +162,7 @@ class ContactDeduplicator {
 
     // MARK: - Private Helpers
 
-    private static func areSimilar(_ a: ContactItem, _ b: ContactItem) -> Bool {
+    private nonisolated static func areSimilar(_ a: ContactItem, _ b: ContactItem) -> Bool {
         let nameMatch = namesAreSimilar(a.fullName, b.fullName)
         guard nameMatch else { return false }
 
@@ -159,13 +181,13 @@ class ContactDeduplicator {
         return false
     }
 
-    private static func namesAreSimilar(_ a: String, _ b: String) -> Bool {
+    private nonisolated static func namesAreSimilar(_ a: String, _ b: String) -> Bool {
         let cleanA = a.replacingOccurrences(of: " ", with: "").lowercased()
         let cleanB = b.replacingOccurrences(of: " ", with: "").lowercased()
         return cleanA == cleanB
     }
 
-    private static func normalizeForComparison(_ phone: String) -> String {
+    private nonisolated static func normalizeForComparison(_ phone: String) -> String {
         var number = phone.replacingOccurrences(of: "[^0-9]", with: "", options: .regularExpression)
         if number.hasPrefix("86") && number.count > 11 {
             number = String(number.dropFirst(2))
@@ -173,7 +195,7 @@ class ContactDeduplicator {
         return number
     }
 
-    private static func detectReason(_ contacts: [ContactItem]) -> String {
+    private nonisolated static func detectReason(_ contacts: [ContactItem]) -> String {
         let names = Set(contacts.map { $0.fullName.replacingOccurrences(of: " ", with: "") })
         let hasSameName = names.count == 1
 

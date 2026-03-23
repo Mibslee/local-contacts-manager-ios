@@ -4,7 +4,7 @@ class ContactNormalizer {
 
     // MARK: - 姓名标准化
 
-    static func normalizeName(for contact: ContactItem) -> ContactItem {
+    nonisolated static func normalizeName(for contact: ContactItem) -> ContactItem {
         var result = contact
 
         if result.familyName.count > 1 && result.givenName.isEmpty {
@@ -21,9 +21,9 @@ class ContactNormalizer {
         return result
     }
 
-    private static let compoundSurnames = ["欧阳", "太史", "端木", "上官", "司马", "东方", "独孤", "南宫", "万俟", "闻人", "夏侯", "诸葛", "尉迟", "公羊", "赫连", "澹台", "皇甫", "宗政", "濮阳", "公冶", "太叔", "申屠", "公孙", "慕容", "仲孙", "钟离", "长孙", "宇文", "司徒", "鲜于", "司空", "令狐", "百里", "东郭", "南门", "呼延", "羊舌", "微生", "公户", "公玉", "公仪", "梁丘", "公仲", "公上", "公门", "公山", "公坚", "公伯", "左丘", "公祖", "亓官", "司寇", "颛孙", "子车", "壤驷", "公良", "夹谷", "宰父", "谷梁", "段干", "拓跋", "乐正", "漆雕", "公西", "巫马", "公乘", "公冶", "宗政"]
+    private nonisolated static let compoundSurnames = ["欧阳", "太史", "端木", "上官", "司马", "东方", "独孤", "南宫", "万俟", "闻人", "夏侯", "诸葛", "尉迟", "公羊", "赫连", "澹台", "皇甫", "宗政", "濮阳", "公冶", "太叔", "申屠", "公孙", "慕容", "仲孙", "钟离", "长孙", "宇文", "司徒", "鲜于", "司空", "令狐", "百里", "东郭", "南门", "呼延", "羊舌", "微生", "公户", "公玉", "公仪", "梁丘", "公仲", "公上", "公门", "公山", "公坚", "公伯", "左丘", "公祖", "亓官", "司寇", "颛孙", "子车", "壤驷", "公良", "夹谷", "宰父", "谷梁", "段干", "拓跋", "乐正", "漆雕", "公西", "巫马", "公乘", "公冶", "宗政"]
 
-    private static func splitChineseName(_ fullName: String) -> (familyName: String, givenName: String) {
+    private nonisolated static func splitChineseName(_ fullName: String) -> (familyName: String, givenName: String) {
         let trimmed = fullName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return ("", "") }
 
@@ -43,12 +43,25 @@ class ContactNormalizer {
 
     // MARK: - 手机号标准化
 
-    static func normalizePhoneNumber(_ phone: String) -> String {
+    nonisolated static func normalizePhoneNumber(_ phone: String) -> String {
         let number = phone
         
         // 只处理前缀，不做格式化，避免字符数组问题
         let cleaned = number.replacingOccurrences(of: "[^0-9+]", with: "", options: .regularExpression)
         
+        // 检查是否为固定电话
+        let digits = cleaned.replacingOccurrences(of: "[^0-9]", with: "", options: .regularExpression)
+        
+        // 固定电话处理
+        if digits.count == 7 || digits.count == 8 {
+            // 7-8位固定电话，返回清理后的号码
+            return cleaned
+        } else if digits.count >= 10 && digits.count <= 12 {
+            // 带区号的固定电话，返回清理后的号码
+            return cleaned
+        }
+        
+        // 手机号前缀处理
         if cleaned.hasPrefix("+86") {
             // 有+86前缀，移除+86，保持统一
             let result = String(cleaned.dropFirst(3))
@@ -61,10 +74,15 @@ class ContactNormalizer {
             return result
         }
         
-        return number
+        // 检查是否为11位手机号，如果是，确保没有前缀
+        if digits.count == 11 && digits.hasPrefix("1") {
+            return digits
+        }
+        
+        return cleaned
     }
 
-    static func unifyPhoneLabel(_ label: String) -> String {
+    nonisolated static func unifyPhoneLabel(_ label: String) -> String {
         let lower = label.lowercased()
         if lower.contains("mobile") || lower.contains("手机") || lower == "mp" || lower == "tel" || lower.contains("phone") {
             return "手机"
@@ -72,7 +90,7 @@ class ContactNormalizer {
         return label
     }
 
-    static func unifyEmailLabel(_ label: String) -> String {
+    nonisolated static func unifyEmailLabel(_ label: String) -> String {
         let lower = label.lowercased()
         if lower.contains("email") || lower.contains("邮箱") || lower.contains("邮件") || lower.contains("e-mail") || lower.contains("mail") {
             return "邮箱"
@@ -82,7 +100,7 @@ class ContactNormalizer {
 
     // MARK: - 邮箱校验
 
-    static func isValidEmail(_ email: String) -> Bool {
+    nonisolated static func isValidEmail(_ email: String) -> Bool {
         let pattern = "[A-Z0-9a-z._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,64}"
         let predicate = NSPredicate(format: "SELF MATCHES %@", pattern)
         return predicate.evaluate(with: email)

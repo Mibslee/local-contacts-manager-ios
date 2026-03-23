@@ -120,7 +120,9 @@ struct CleanupView: View {
             Button("开始整理", role: .destructive) {
                 Task {
                     _ = await cleanupVM.backupContacts(appVM.contacts)
-                    _ = cleanupVM.runCleanup(on: appVM.contacts)
+                    let processed = await cleanupVM.runCleanup(on: appVM.contacts)
+                    appVM.contacts = processed
+                    appVM.healthReport = HealthAnalyzer.analyze(processed)
                 }
             }
         } message: {

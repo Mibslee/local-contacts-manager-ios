@@ -5,6 +5,7 @@ struct IssueContactsView: View {
     let issueType: HealthReport.IssueType
     let contacts: [ContactItem]
     @State private var searchText = ""
+    @State private var selectedContacts: Set<ContactItem.ID> = []
 
     var filteredContacts: [ContactItem] {
         if searchText.isEmpty { return contacts }
@@ -22,12 +23,23 @@ struct IssueContactsView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                     Spacer()
+                    Button(action: toggleSelectAll) {
+                        Text(selectedContacts.count == filteredContacts.count ? "取消全选" : "全选")
+                            .font(.caption)
+                            .foregroundStyle(.blue)
+                    }
                 }
                 .padding(.horizontal)
                 .padding(.vertical, 12)
 
                 ForEach(filteredContacts) { contact in
                     HStack(spacing: 12) {
+                        Button(action: { toggleSelection(contact) }) {
+                            Image(systemName: selectedContacts.contains(contact.id) ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(selectedContacts.contains(contact.id) ? .blue : .secondary)
+                                .font(.system(size: 20))
+                        }
+
                         ZStack {
                             Circle()
                                 .fill(.blue.opacity(0.15))
@@ -53,13 +65,29 @@ struct IssueContactsView: View {
                     .padding(.vertical, 10)
 
                     Divider()
-                        .padding(.leading, 64)
+                        .padding(.leading, 88)
                 }
             }
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $searchText, prompt: "搜索联系人")
+    }
+
+    private func toggleSelectAll() {
+        if selectedContacts.count == filteredContacts.count {
+            selectedContacts.removeAll()
+        } else {
+            selectedContacts = Set(filteredContacts.map { $0.id })
+        }
+    }
+
+    private func toggleSelection(_ contact: ContactItem) {
+        if selectedContacts.contains(contact.id) {
+            selectedContacts.remove(contact.id)
+        } else {
+            selectedContacts.insert(contact.id)
+        }
     }
 
     @ViewBuilder

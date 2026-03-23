@@ -7,7 +7,7 @@ class HealthAnalyzer {
         var totalPhoneNumbers = 0
         var totalEmails = 0
         var contactsMissingName = 0
-        var contactsNameNotSplit = 0
+        var contactsNameNeedsStandardize = 0
         var contactsInconsistentPhonePrefix = 0
         var contactsInconsistentPhoneLabel = 0
         var contactsInconsistentEmailLabel = 0
@@ -27,7 +27,7 @@ class HealthAnalyzer {
             if contact.familyName.isEmpty && contact.givenName.isEmpty {
                 contactsMissingName += 1
             } else if needsNameFix(contact) {
-                contactsNameNotSplit += 1
+                contactsNameNeedsStandardize += 1
             }
 
             let phonePrefixes = contact.phoneNumbers.map { $0.value }.map { extractPhonePrefix($0) }
@@ -80,8 +80,8 @@ class HealthAnalyzer {
             totalPhoneNumbers: totalPhoneNumbers,
             totalEmails: totalEmails,
             contactsMissingName: contactsMissingName,
-            contactsNameNotSplit: contactsNameNotSplit,
-            contactsNameNeedsStandardize: contactsNameNotSplit,
+            contactsNameNotSplit: 0,
+            contactsNameNeedsStandardize: contactsNameNeedsStandardize,
             contactsInconsistentPhonePrefix: contactsInconsistentPhonePrefix,
             contactsInconsistentPhoneLabel: contactsInconsistentPhoneLabel,
             contactsInconsistentEmailLabel: contactsInconsistentEmailLabel,
@@ -121,6 +121,35 @@ class HealthAnalyzer {
         if clean.count >= 5 && clean.count <= 15 { return true }
         
         return false
+    }
+    
+    private static func isFixedLinePhone(_ phone: String) -> Bool {
+        let digits = phone.replacingOccurrences(of: "[^0-9]", with: "", options: .regularExpression)
+        let clean = digits.hasPrefix("86") && digits.count > 11 ? String(digits.dropFirst(2)) : digits
+        
+        // 固定电话（7-8位）
+        if clean.count == 7 || clean.count == 8 { return true }
+        
+        // 带区号的固定电话（10-12位）
+        if clean.count >= 10 && clean.count <= 12 { return true }
+        
+        return false
+    }
+    
+    private static func extractAreaCode(_ phone: String) -> String? {
+        let digits = phone.replacingOccurrences(of: "[^0-9]", with: "", options: .regularExpression)
+        let clean = digits.hasPrefix("86") && digits.count > 11 ? String(digits.dropFirst(2)) : digits
+        
+        // 带区号的固定电话（10-12位）
+        if clean.count >= 10 && clean.count <= 12 {
+            // 区号通常是3-4位
+            let areaCodeLength = clean.count - 8 // 假设后面8位是电话号码
+            if areaCodeLength >= 3 && areaCodeLength <= 4 {
+                return String(clean.prefix(areaCodeLength))
+            }
+        }
+        
+        return nil
     }
 
     private static func extractPhonePrefix(_ phone: String) -> String {

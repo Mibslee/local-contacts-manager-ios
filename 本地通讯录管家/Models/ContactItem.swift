@@ -22,9 +22,9 @@ struct ContactItem: Identifiable, Hashable {
         return "\(f)\(g)"
     }
 
-    var hasPhone: Bool { !phoneNumbers.isEmpty }
-    var hasEmail: Bool { !emailAddresses.isEmpty }
-    var isEmpty: Bool { !hasPhone && !hasEmail }
+    nonisolated var hasPhone: Bool { !phoneNumbers.isEmpty }
+    nonisolated var hasEmail: Bool { !emailAddresses.isEmpty }
+    nonisolated var isEmpty: Bool { !hasPhone && !hasEmail }
 
     struct LabeledValue: Identifiable, Hashable {
         let id = UUID()

@@ -1,0 +1,10 @@
+schemaVersion: 1
+enabledWorkflows:
+  - simulator
+  - ui-automation
+  - debugging
+  - testing
+sessionDefaults:
+  scheme: 本地通讯录管家
+  projectPath: ./本地通讯录管家.xcodeproj
+  simulatorName: iPhone 17 Pro

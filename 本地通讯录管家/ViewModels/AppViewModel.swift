@@ -11,6 +11,8 @@ class AppViewModel: ObservableObject {
     @Published var isAuthorized = false
     @Published var errorMessage: String?
     @Published var searchText = ""
+    @Published var loadingProgress: Double = 0
+    @Published var loadedContactsCount: Int = 0
 
     var filteredContacts: [ContactItem] {
         if searchText.isEmpty { return contacts }
@@ -49,6 +51,8 @@ class AppViewModel: ObservableObject {
     func loadContacts() async {
         isLoading = true
         errorMessage = nil
+        loadingProgress = 0
+        loadedContactsCount = 0
 
         let keysToFetch: [CNKeyDescriptor] = [
             CNContactIdentifierKey as CNKeyDescriptor,
@@ -66,10 +70,24 @@ class AppViewModel: ObservableObject {
             request.sortOrder = .userDefault
             var fetched: [ContactItem] = []
             var fetchError: String?
+            var count = 0
 
             do {
                 try store.enumerateContacts(with: request) { cnContact, _ in
                     fetched.append(ContactItem(cnContact: cnContact))
+                    count += 1
+                    // 每10个联系人更新一次进度（在主线程上）
+                    if count % 10 == 0 {
+                        let progress = count
+                        Task { @MainActor in
+                            self.loadedContactsCount = progress
+                        }
+                    }
+                }
+                // 枚举完成后，确保最终计数被更新
+                let total = count
+                Task { @MainActor in
+                    self.loadedContactsCount = total
                 }
             } catch {
                 fetchError = "读取通讯录失败: \(error.localizedDescription)"
@@ -82,12 +100,17 @@ class AppViewModel: ObservableObject {
             errorMessage = error
             contacts = []
             healthReport = .empty
+            isLoading = false
         } else {
             contacts = result.contacts
-            healthReport = HealthAnalyzer.analyze(result.contacts)
+            // 先设置 isLoading 为 false，让用户看到联系人列表
+            isLoading = false
+            // 在主线程中执行健康分析
+            Task {
+                let report = HealthAnalyzer.analyze(result.contacts)
+                healthReport = report
+            }
         }
-
-        isLoading = false
     }
 
     func refresh() async {
@@ -123,6 +146,7 @@ class AppViewModel: ObservableObject {
                 c.emailAddresses.contains { !ContactNormalizer.isValidEmail($0.value) }
             }
         case .contactDuplicate:
+            // 延迟计算重复联系人，避免首次进入时卡顿
             let groups = ContactDeduplicator.findDuplicates(in: contacts)
             return groups.flatMap { $0.contacts }
         case .emptyContact:
@@ -150,5 +174,9 @@ class AppViewModel: ObservableObject {
         if clean.count == 11 && clean.hasPrefix("1") { return true }
         if clean.count >= 7 && clean.count <= 15 { return true }
         return false
+    }
+    
+    func issueTitle(for type: HealthReport.IssueType) -> String {
+        return type.rawValue
     }
 }

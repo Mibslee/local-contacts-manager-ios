@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import Contacts
 
 struct ImportView: View {
     @ObservedObject var appVM: AppViewModel
@@ -101,6 +102,7 @@ struct ImportView: View {
                 }
             }
         }
+        .accessibilityIdentifier("tab.import.root")
         .navigationTitle("导入")
         .fileImporter(
             isPresented: $showFilePicker,
