@@ -50,7 +50,6 @@ struct OptimizedHomeView: View {
                     IssueDetailView(
                         title: appVM.issueTitle(for: issueType),
                         issueType: issueType,
-                        contacts: appVM.contactsForIssue(issueType),
                         selectedContactIDs: $selectedContactIDs,
                         onPreExecute: { await preExecute(for: issueType) },
                         onIgnore: { ignoreIssue(issueType) },
@@ -574,7 +573,6 @@ struct OptimizedHomeView: View {
 struct IssueDetailView: View {
     let title: String
     let issueType: HealthReport.IssueType
-    let contacts: [ContactItem]
     @Binding var selectedContactIDs: Set<ContactItem.ID>
     let onPreExecute: () async -> Void
     let onIgnore: () -> Void
@@ -582,12 +580,7 @@ struct IssueDetailView: View {
 
     @State private var searchText = ""
     @State private var isLoading = true
-    @State private var isContentLoaded = false
-    @State private var duplicateContacts: [ContactItem] = []
-
-    var displayedContacts: [ContactItem] {
-        issueType == .contactDuplicate ? duplicateContacts : contacts
-    }
+    @State private var displayedContacts: [ContactItem] = []
 
     var filteredContacts: [ContactItem] {
         if searchText.isEmpty { return displayedContacts }
@@ -601,7 +594,7 @@ struct IssueDetailView: View {
         NavigationStack {
             ZStack {
                 AppTheme.pageBackground.ignoresSafeArea()
-                if isContentLoaded {
+                if !isLoading {
                     ScrollView {
                         LazyVStack(spacing: 0) {
                             // 顶部摘要
@@ -695,14 +688,11 @@ struct IssueDetailView: View {
                 }
             }
             .onAppear {
-                if issueType == .contactDuplicate {
-                    isLoading = true; isContentLoaded = false
-                    Task {
-                        let dupes = appVM.contactsForIssue(.contactDuplicate)
-                        await MainActor.run { self.duplicateContacts = dupes; self.isLoading = false; self.isContentLoaded = true }
-                    }
-                } else {
-                    isLoading = false; isContentLoaded = true
+                isLoading = true
+                Task {
+                    let contacts = appVM.contactsForIssue(issueType)
+                    displayedContacts = contacts
+                    isLoading = false
                 }
             }
             .accessibilityIdentifier("issue.detail.root")
