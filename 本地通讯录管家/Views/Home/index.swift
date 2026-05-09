@@ -688,6 +688,12 @@ struct IssueDetailView: View {
                 }
             }
             .onAppear {
+                // contactDuplicate 有预计算缓存，直接读取即可
+                if issueType == .contactDuplicate, let cached = appVM.cachedDuplicateContacts {
+                    displayedContacts = cached
+                    isLoading = false
+                    return
+                }
                 isLoading = true
                 Task {
                     let allContacts = appVM.contacts
@@ -695,6 +701,10 @@ struct IssueDetailView: View {
                     let filtered = await Task.detached {
                         filterContactsForIssue(allContacts, type: type)
                     }.value
+                    // 缓存 contactDuplicate 结果
+                    if type == .contactDuplicate {
+                        await MainActor.run { appVM.cachedDuplicateContacts = filtered }
+                    }
                     displayedContacts = filtered
                     isLoading = false
                 }

@@ -15,7 +15,7 @@ class AppViewModel: ObservableObject {
     @Published var loadedContactsCount: Int = 0
 
     /// 重复联系人缓存，避免每次打开详情页重新计算
-    private var cachedDuplicateContacts: [ContactItem]?
+    var cachedDuplicateContacts: [ContactItem]?
 
     var filteredContacts: [ContactItem] {
         if searchText.isEmpty { return contacts }
@@ -109,11 +109,15 @@ class AppViewModel: ObservableObject {
             contacts = result.contacts
             // 先设置 isLoading 为 false，让用户看到联系人列表
             isLoading = false
-            // 后台线程执行健康分析，避免阻塞 UI
+            // 后台线程执行健康分析 + 预计算重复联系人缓存，避免阻塞 UI
             Task.detached {
                 let report = HealthAnalyzer.analyze(result.contacts)
+                // 预计算重复联系人缓存，避免用户点击时才执行慢速 Union-Find
+                let groups = ContactDeduplicator.findDuplicates(in: result.contacts)
+                let cached = groups.flatMap { $0.contacts }
                 await MainActor.run {
                     self.healthReport = report
+                    self.cachedDuplicateContacts = cached
                 }
             }
         }
