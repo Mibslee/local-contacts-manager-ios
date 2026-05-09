@@ -372,6 +372,7 @@ class CleanupViewModel: ObservableObject {
                             }
                         }
                         try store.execute(saveReq)
+                        print("[WriteBack] 删除批次: 请求\(ids.count)个, 实际匹配\(cs.count)个")
                     } catch {
                         print("[WriteBack] 删除批次失败: \(error)")
                     }
@@ -424,6 +425,33 @@ class CleanupViewModel: ObservableObject {
         successCount = result.0
         failedCount = result.1
 
+        // 验证：写入后读取系统通讯录，确认数据已更新
+        await Task.detached {
+            let store = CNContactStore()
+            let keys: [CNKeyDescriptor] = [
+                CNContactFamilyNameKey as CNKeyDescriptor,
+                CNContactGivenNameKey as CNKeyDescriptor,
+                CNContactPhoneNumbersKey as CNKeyDescriptor
+            ]
+            var verifyCount = 0
+            var sampleLabels: [String] = []
+            do {
+                let req = CNContactFetchRequest(keysToFetch: keys)
+                try store.enumerateContacts(with: req) { c, _ in
+                    verifyCount += 1
+                    if sampleLabels.count < 3 {
+                        for p in c.phoneNumbers {
+                            sampleLabels.append(p.label ?? "nil")
+                        }
+                    }
+                }
+            } catch {
+                print("[WriteBack] 验证失败: \(error)")
+            }
+            print("[WriteBack] 验证: 系统通讯录现有 \(verifyCount) 位联系人")
+            print("[WriteBack] 验证: 前几个电话标签: \(sampleLabels)")
+        }.value
+
         await MainActor.run {
             self.writeBackProgress = 1.0
             self.isWritingBack = false
@@ -431,7 +459,7 @@ class CleanupViewModel: ObservableObject {
                 self.lastWrittenSignature = signature
             }
         }
-        print("[WriteBack] 写入完成: 成功 \(successCount), 失败 \(failedCount), 系统已有\(result.0 - failedCount)条")
+        print("[WriteBack] 写入完成: 成功 \(successCount), 失败 \(failedCount)")
         return (successCount, failedCount)
     }
 
