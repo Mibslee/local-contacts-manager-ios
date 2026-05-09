@@ -55,11 +55,13 @@ class CleanupViewModel: ObservableObject {
             var emailInvalidAffected: [ContactItem] = []
             var emptyAffected: [ContactItem] = []
 
+            var processedCount = 0
             for i in 0..<currentContacts.count {
                 guard !excludedIDs.contains(currentContacts[i].id) else {
                     if i % 100 == 0 { await Task.yield() }
                     continue
                 }
+                processedCount += 1
                 var contact = currentContacts[i]
 
                 // 姓名标准化
@@ -191,6 +193,8 @@ class CleanupViewModel: ObservableObject {
                 if i % 100 == 0 { await Task.yield() }
             }
 
+            print("[Cleanup] 遍历完成: 总计 \(currentContacts.count), 实际处理 \(processedCount), 排除 \(excludedIDs.count)")
+
             // 生成单次遍历的结果
             if options.contains(.nameNormalization) {
                 let after = currentContacts.filter { !excludedIDs.contains($0.id) && ContactValidator.needsNameCheck($0) }.count
@@ -252,6 +256,7 @@ class CleanupViewModel: ObservableObject {
     func runCleanup(on contacts: [ContactItem]) async -> [ContactItem] {
         isProcessing = true
         let startTime = Date()
+        print("[Cleanup] 开始清理: \(contacts.count) 位联系人, 选项: \(selectedOptions.map { $0.rawValue }), 排除: \(excludedContactIDs.count) 位")
         
         // 在后台线程执行清理操作
         let (processedContacts, results, duplicateGroups) = await performCleanupInBackground(
@@ -271,6 +276,10 @@ class CleanupViewModel: ObservableObject {
         self.showResult = true
         // 新一轮整理结果，重置写入幂等标记
         self.lastWrittenSignature = nil
+        print("[Cleanup] 清理完成: 输入 \(contacts.count) 位 → 输出 \(processedContacts.count) 位")
+        for r in results {
+            print("[Cleanup]   \(r.option.rawValue): 前\(r.beforeCount) → 后\(r.afterCount), 改进: \(r.improved)")
+        }
 
         return processedContacts
     }
