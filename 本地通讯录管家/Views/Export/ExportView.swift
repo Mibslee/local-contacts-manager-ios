@@ -38,35 +38,7 @@ struct ExportView: View {
                     Text("导出格式").font(.subheadline.bold()).foregroundStyle(.secondary)
 
                     ForEach(ExportFormat.allCases) { format in
-                        Button { selectedFormat = format } label: {
-                            HStack(spacing: 12) {
-                                ZStack {
-                                    RoundedRectangle(cornerRadius: 10)
-                                        .fill(selectedFormat == format ? Color(hex: "4F7DF5").opacity(0.12) : Color.secondary.opacity(0.06))
-                                        .frame(width: 40, height: 40)
-                                    Image(systemName: format.icon)
-                                        .font(.title3)
-                                        .foregroundStyle(selectedFormat == format ? Color(hex: "4F7DF5") : .secondary)
-                                }
-                                Text(format.rawValue)
-                                    .font(.subheadline.bold())
-                                    .foregroundStyle(.primary)
-                                Spacer()
-                                if selectedFormat == format {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .foregroundStyle(Color(hex: "4F7DF5"))
-                                }
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 10)
-                            .background(AppTheme.cardBackground)
-                            .clipShape(RoundedRectangle(cornerRadius: AppTheme.smallRadius))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: AppTheme.smallRadius)
-                                    .stroke(selectedFormat == format ? Color(hex: "4F7DF5").opacity(0.3) : Color.clear, lineWidth: 1.5)
-                            )
-                        }
-                        .buttonStyle(.plain)
+                        formatRow(format)
                     }
                 }
 
@@ -90,7 +62,7 @@ struct ExportView: View {
                     .font(.headline)
                     .foregroundStyle(.white)
                     .padding(.vertical, 16)
-                    .background(contactsToExport.isEmpty ? Color.gray.opacity(0.4) : AppTheme.warningGradient)
+                    .background(exportButtonBackground)
                     .clipShape(RoundedRectangle(cornerRadius: 14))
                     .shadow(color: contactsToExport.isEmpty ? .clear : Color(hex: "FF9500").opacity(0.3), radius: 8, y: 4)
                 }
@@ -108,6 +80,43 @@ struct ExportView: View {
         } message: {
             Text("已导出 \(contactsToExport.count) 位联系人为 \(selectedFormat.rawValue) 文件")
         }
+    }
+
+    private var exportButtonBackground: Color {
+        contactsToExport.isEmpty ? Color.gray.opacity(0.4) : Color(hex: "FF9500")
+    }
+
+    private func formatRow(_ format: ExportFormat) -> some View {
+        let isSelected = selectedFormat == format
+        return Button { selectedFormat = format } label: {
+            HStack(spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(isSelected ? Color(hex: "4F7DF5").opacity(0.12) : Color.secondary.opacity(0.06))
+                        .frame(width: 40, height: 40)
+                    Image(systemName: format.icon)
+                        .font(.title3)
+                        .foregroundStyle(isSelected ? Color(hex: "4F7DF5") : .secondary)
+                }
+                Text(format.rawValue)
+                    .font(.subheadline.bold())
+                    .foregroundStyle(.primary)
+                Spacer()
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(Color(hex: "4F7DF5"))
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(AppTheme.cardBackground)
+            .clipShape(RoundedRectangle(cornerRadius: AppTheme.smallRadius))
+            .overlay(
+                RoundedRectangle(cornerRadius: AppTheme.smallRadius)
+                    .stroke(isSelected ? Color(hex: "4F7DF5").opacity(0.3) : Color.clear, lineWidth: 1.5)
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     private func infoRow(label: String, value: String) -> some View {

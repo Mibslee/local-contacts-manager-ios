@@ -103,7 +103,7 @@ struct CleanupView: View {
                     .font(.headline)
                     .foregroundStyle(.white)
                     .padding(.vertical, 16)
-                    .background(cleanupVM.selectedOptions.isEmpty ? Color.gray.opacity(0.4) : AppTheme.primaryGradient)
+                    .background(cleanupVM.selectedOptions.isEmpty ? Color.gray.opacity(0.4) : Color(hex: "4F7DF5"))
                     .clipShape(RoundedRectangle(cornerRadius: 14))
                     .shadow(color: cleanupVM.selectedOptions.isEmpty ? .clear : Color(hex: "4F7DF5").opacity(0.3), radius: 8, y: 4)
                 }
