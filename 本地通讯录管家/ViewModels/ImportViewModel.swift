@@ -33,10 +33,6 @@ class ImportViewModel: ObservableObject {
         isImporting = false
     }
 
-    func mergeToSystem(using manager: ContactsManager) -> (success: Int, failed: Int) {
-        return manager.batchSaveContacts(importedContacts)
-    }
-
     func mergeToSystemDirect() -> (success: Int, failed: Int) {
         let store = CNContactStore()
         let saveRequest = CNSaveRequest()

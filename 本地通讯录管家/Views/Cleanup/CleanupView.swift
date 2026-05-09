@@ -10,43 +10,26 @@ struct CleanupView: View {
     @State private var backupDone = false
 
     var body: some View {
-        List {
-            if cleanupVM.hasBackup {
-                Section {
-                    HStack {
-                        Image(systemName: "checkmark.shield.fill")
-                            .foregroundStyle(.green)
-                        VStack(alignment: .leading) {
-                            Text("已备份通讯录")
-                                .font(.subheadline.bold())
-                            Text("如需恢复，请点击下方按钮")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                    }
-                    Button(role: .destructive) {
-                        showRestoreConfirm = true
-                    } label: {
-                        HStack {
-                            Spacer()
-                            Image(systemName: "arrow.counterclockwise")
-                            Text("恢复通讯录")
-                            Spacer()
-                        }
-                    }
-                } header: {
-                    Text("备份与恢复")
+        ScrollView {
+            VStack(spacing: AppTheme.sectionSpacing) {
+                // 备份状态卡片
+                if cleanupVM.hasBackup {
+                    backupCard
                 }
-            }
 
-            Section {
-                Text("选择需要优化的项目，系统会自动备份后执行清理")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
+                // 说明
+                HStack(spacing: 8) {
+                    Image(systemName: "info.circle.fill")
+                        .foregroundStyle(.blue)
+                        .font(.subheadline)
+                    Text("选择需要优化的项目，系统会自动备份后执行清理")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 4)
 
-            Section("整理选项") {
+                // 全选控制
                 HStack {
                     Button {
                         if cleanupVM.selectedOptions.count == CleanupOption.allCases.count {
@@ -55,49 +38,62 @@ struct CleanupView: View {
                             cleanupVM.selectedOptions = Set(CleanupOption.allCases)
                         }
                     } label: {
-                        HStack(spacing: 4) {
+                        HStack(spacing: 6) {
                             Image(systemName: cleanupVM.selectedOptions.count == CleanupOption.allCases.count ? "checkmark.square.fill" : "square")
+                                .foregroundStyle(cleanupVM.selectedOptions.count == CleanupOption.allCases.count ? .blue : .secondary)
                             Text(cleanupVM.selectedOptions.count == CleanupOption.allCases.count ? "取消全选" : "全选")
-                                .font(.subheadline)
+                                .font(.subheadline.bold())
                         }
                     }
                     Spacer()
                     Text("\(cleanupVM.selectedOptions.count)/\(CleanupOption.allCases.count)")
-                        .font(.caption)
+                        .font(.caption.bold())
                         .foregroundStyle(.secondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(Color.secondary.opacity(0.1))
+                        .clipShape(Capsule())
                 }
+                .padding(.horizontal, 4)
 
-                ForEach(CleanupOption.allCases) { option in
-                    CleanupOptionRow(option: option, isSelected: cleanupVM.selectedOptions.contains(option)) {
-                        if cleanupVM.selectedOptions.contains(option) {
-                            cleanupVM.selectedOptions.remove(option)
-                        } else {
-                            cleanupVM.selectedOptions.insert(option)
+                // 选项列表
+                VStack(spacing: 8) {
+                    ForEach(CleanupOption.allCases) { option in
+                        CleanupOptionRow(option: option, isSelected: cleanupVM.selectedOptions.contains(option)) {
+                            if cleanupVM.selectedOptions.contains(option) {
+                                cleanupVM.selectedOptions.remove(option)
+                            } else {
+                                cleanupVM.selectedOptions.insert(option)
+                            }
                         }
                     }
                 }
-            }
 
-            if cleanupVM.selectedOptions.contains(.contactDeduplicate) {
-                Section("合并策略") {
-                    Picker("策略", selection: $cleanupVM.mergeStrategy) {
-                        ForEach(MergeStrategy.allCases, id: \.self) { strategy in
-                            Text(strategy.rawValue).tag(strategy)
+                // 合并策略
+                if cleanupVM.selectedOptions.contains(.contactDeduplicate) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("合并策略")
+                            .font(.subheadline.bold())
+                        Picker("策略", selection: $cleanupVM.mergeStrategy) {
+                            ForEach(MergeStrategy.allCases, id: \.self) { strategy in
+                                Text(strategy.rawValue).tag(strategy)
+                            }
                         }
+                        .pickerStyle(.segmented)
                     }
-                    .pickerStyle(.segmented)
+                    .padding()
+                    .background(AppTheme.cardBackground)
+                    .clipShape(RoundedRectangle(cornerRadius: AppTheme.cardRadius))
                 }
-            }
 
-            Section {
+                // 开始按钮
                 Button {
                     showConfirmCleanup = true
                 } label: {
                     HStack {
                         Spacer()
                         if cleanupVM.isProcessing {
-                            ProgressView()
-                                .tint(.white)
+                            ProgressView().tint(.white)
                         } else {
                             Image(systemName: "wand.and.stars")
                             Text("开始整理")
@@ -106,14 +102,16 @@ struct CleanupView: View {
                     }
                     .font(.headline)
                     .foregroundStyle(.white)
-                    .padding()
-                    .background(cleanupVM.selectedOptions.isEmpty ? .gray : .blue)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .padding(.vertical, 16)
+                    .background(cleanupVM.selectedOptions.isEmpty ? Color.gray.opacity(0.4) : AppTheme.primaryGradient)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .shadow(color: cleanupVM.selectedOptions.isEmpty ? .clear : Color(hex: "4F7DF5").opacity(0.3), radius: 8, y: 4)
                 }
                 .disabled(cleanupVM.selectedOptions.isEmpty || cleanupVM.isProcessing)
-                .listRowBackground(Color.clear)
             }
+            .padding()
         }
+        .background(AppTheme.pageBackground)
         .navigationTitle("通讯录整理")
         .alert("确认整理", isPresented: $showConfirmCleanup) {
             Button("取消", role: .cancel) {}
@@ -140,9 +138,7 @@ struct CleanupView: View {
             Button("取消", role: .cancel) {}
             if !cleanupVM.isWritingBack {
                 Button("确认写入", role: .destructive) {
-                    Task {
-                        writeBackResult = await cleanupVM.writeBackToSystemDirect()
-                    }
+                    Task { writeBackResult = await cleanupVM.writeBackToSystemDirect() }
                 }
             }
         } message: {
@@ -158,29 +154,45 @@ struct CleanupView: View {
         )) {
             Button("确定") {
                 writeBackResult = nil
-                Task {
-                    try? await Task.sleep(nanoseconds: 500_000_000)
-                    await appVM.refresh()
-                }
+                Task { try? await Task.sleep(nanoseconds: 500_000_000); await appVM.refresh() }
             }
         } message: {
-            if let result = writeBackResult {
-                Text("成功写入 \(result.success) 位联系人" + (result.failed > 0 ? "，失败 \(result.failed) 位" : ""))
+            if let r = writeBackResult {
+                Text("成功写入 \(r.success) 位联系人" + (r.failed > 0 ? "，失败 \(r.failed) 位" : ""))
             }
         }
         .alert("恢复通讯录", isPresented: $showRestoreConfirm) {
             Button("取消", role: .cancel) {}
             Button("确认恢复", role: .destructive) {
-                Task {
-                    let ok = await cleanupVM.restoreFromBackup()
-                    if ok {
-                        await appVM.refresh()
-                    }
-                }
+                Task { if await cleanupVM.restoreFromBackup() { await appVM.refresh() } }
             }
-        } message: {
-            Text("将从备份文件恢复通讯录到备份时的状态")
+        } message: { Text("将从备份文件恢复通讯录到备份时的状态") }
+    }
+
+    private var backupCard: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle().fill(Color.green.opacity(0.12)).frame(width: 40, height: 40)
+                Image(systemName: "checkmark.shield.fill").foregroundStyle(.green)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text("已备份通讯录").font(.subheadline.bold())
+                Text("如需恢复，请点击下方按钮").font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button(role: .destructive) { showRestoreConfirm = true } label: {
+                Text("恢复")
+                    .font(.caption.bold())
+                    .foregroundStyle(.red)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 6)
+                    .background(Color.red.opacity(0.1))
+                    .clipShape(Capsule())
+            }
         }
+        .padding()
+        .background(AppTheme.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: AppTheme.cardRadius))
     }
 }
 
@@ -193,22 +205,37 @@ struct CleanupOptionRow: View {
         Button(action: onTap) {
             HStack(spacing: 12) {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(isSelected ? .blue : .secondary)
-                    .font(.title3)
+                    .foregroundStyle(isSelected ? Color(hex: "4F7DF5") : .secondary)
+                    .font(.system(size: 20))
 
-                Image(systemName: option.icon)
-                    .foregroundStyle(.blue)
-                    .frame(width: 24)
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(isSelected ? Color(hex: "4F7DF5").opacity(0.12) : Color.secondary.opacity(0.08))
+                        .frame(width: 36, height: 36)
+                    Image(systemName: option.icon)
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(isSelected ? Color(hex: "4F7DF5") : .secondary)
+                }
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(option.rawValue)
                         .font(.subheadline.bold())
                         .foregroundStyle(.primary)
                     Text(option.description)
-                        .font(.caption)
+                        .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
+
+                Spacer()
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(AppTheme.cardBackground)
+            .clipShape(RoundedRectangle(cornerRadius: AppTheme.smallRadius))
+            .overlay(
+                RoundedRectangle(cornerRadius: AppTheme.smallRadius)
+                    .stroke(isSelected ? Color(hex: "4F7DF5").opacity(0.3) : Color.clear, lineWidth: 1.5)
+            )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

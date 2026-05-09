@@ -73,6 +73,6 @@ struct ContactItem: Identifiable, Hashable {
     }
 
     static func sanitizePhone(_ raw: String) -> String {
-        return raw
+        ContactValidator.cleanPhoneNumber(raw)
     }
 }

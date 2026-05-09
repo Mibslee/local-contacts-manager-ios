@@ -26,11 +26,11 @@ class HealthAnalyzer {
 
             if contact.familyName.isEmpty && contact.givenName.isEmpty {
                 contactsMissingName += 1
-            } else if needsNameFix(contact) {
+            } else if ContactValidator.needsNameFix(contact) {
                 contactsNameNeedsStandardize += 1
             }
 
-            let phonePrefixes = contact.phoneNumbers.map { $0.value }.map { extractPhonePrefix($0) }
+            let phonePrefixes = contact.phoneNumbers.map { $0.value }.map { ContactValidator.extractPhonePrefix($0) }
             let uniquePrefixes = Set(phonePrefixes)
             if uniquePrefixes.count > 1 {
                 contactsInconsistentPhonePrefix += 1
@@ -68,7 +68,7 @@ class HealthAnalyzer {
 
             for phone in contact.phoneNumbers {
                 let digits = phone.value.replacingOccurrences(of: "[^0-9]", with: "", options: .regularExpression)
-                if !isValidChinesePhone(digits) {
+                if !ContactValidator.isValidChinesePhone(digits) {
                     garbledPhoneCount += 1
                     break
                 }
@@ -94,68 +94,4 @@ class HealthAnalyzer {
         )
     }
 
-    private static func needsNameFix(_ contact: ContactItem) -> Bool {
-        if contact.familyName.count > 1 && contact.givenName.isEmpty { return true }
-        if contact.givenName.count > 1 && contact.familyName.isEmpty { return true }
-        if contact.familyName.isEmpty && contact.givenName.isEmpty && !contact.fullName.isEmpty { return true }
-        return false
-    }
-
-    private static func isValidChinesePhone(_ digits: String) -> Bool {
-        if digits.isEmpty { return true }
-        let clean = digits.hasPrefix("86") && digits.count > 11 ? String(digits.dropFirst(2)) : digits
-        
-        // 11位手机号（1开头）
-        if clean.count == 11 && clean.hasPrefix("1") { return true }
-        
-        // 客服/服务电话（5-6位）
-        if clean.count == 5 || clean.count == 6 { return true }
-        
-        // 固定电话（7-8位）
-        if clean.count == 7 || clean.count == 8 { return true }
-        
-        // 带区号的固定电话（10-12位）
-        if clean.count >= 10 && clean.count <= 12 { return true }
-        
-        // 国际号码或其他（只要不是太短都接受）
-        if clean.count >= 5 && clean.count <= 15 { return true }
-        
-        return false
-    }
-    
-    private static func isFixedLinePhone(_ phone: String) -> Bool {
-        let digits = phone.replacingOccurrences(of: "[^0-9]", with: "", options: .regularExpression)
-        let clean = digits.hasPrefix("86") && digits.count > 11 ? String(digits.dropFirst(2)) : digits
-        
-        // 固定电话（7-8位）
-        if clean.count == 7 || clean.count == 8 { return true }
-        
-        // 带区号的固定电话（10-12位）
-        if clean.count >= 10 && clean.count <= 12 { return true }
-        
-        return false
-    }
-    
-    private static func extractAreaCode(_ phone: String) -> String? {
-        let digits = phone.replacingOccurrences(of: "[^0-9]", with: "", options: .regularExpression)
-        let clean = digits.hasPrefix("86") && digits.count > 11 ? String(digits.dropFirst(2)) : digits
-        
-        // 带区号的固定电话（10-12位）
-        if clean.count >= 10 && clean.count <= 12 {
-            // 区号通常是3-4位
-            let areaCodeLength = clean.count - 8 // 假设后面8位是电话号码
-            if areaCodeLength >= 3 && areaCodeLength <= 4 {
-                return String(clean.prefix(areaCodeLength))
-            }
-        }
-        
-        return nil
-    }
-
-    private static func extractPhonePrefix(_ phone: String) -> String {
-        let cleaned = phone.replacingOccurrences(of: "[^0-9+]", with: "", options: .regularExpression)
-        if cleaned.hasPrefix("+86") { return "+86" }
-        if cleaned.hasPrefix("86") && cleaned.count > 11 { return "86" }
-        return "none"
-    }
 }

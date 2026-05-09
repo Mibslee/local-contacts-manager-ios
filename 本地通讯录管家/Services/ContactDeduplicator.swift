@@ -11,46 +11,65 @@ class ContactDeduplicator {
 
     nonisolated static func findDuplicates(in contacts: [ContactItem]) -> [DuplicateGroup] {
         var groups: [DuplicateGroup] = []
-        var processed = Set<String>()
-        
-        // 使用字典按姓名分组，提高性能
+
+        // 使用字典按姓名分组
         var nameGroups: [String: [ContactItem]] = [:]
-        
         for contact in contacts {
             let normalizedName = contact.fullName.replacingOccurrences(of: " ", with: "").lowercased()
             if !normalizedName.isEmpty {
                 nameGroups[normalizedName, default: []].append(contact)
             }
         }
-        
-        // 处理按姓名分组的联系人
-        for (_, nameGroup) in nameGroups {
-            if nameGroup.count > 1 {
-                // 进一步检查是否有相同的联系方式
-                var similarGroups: [DuplicateGroup] = []
-                var groupProcessed = Set<String>()
-                
-                for (i, contact) in nameGroup.enumerated() {
-                    guard !groupProcessed.contains(contact.id) && !processed.contains(contact.id) else { continue }
-                    
-                    var duplicates: [ContactItem] = [contact]
-                    
-                    for (j, other) in nameGroup.enumerated() where j != i && !groupProcessed.contains(other.id) && !processed.contains(other.id) {
-                        if areSimilar(contact, other) {
-                            duplicates.append(other)
-                            groupProcessed.insert(other.id)
-                            processed.insert(other.id)
-                        }
-                    }
-                    
-                    if duplicates.count > 1 {
-                        similarGroups.append(DuplicateGroup(contacts: duplicates, reason: detectReason(duplicates)))
-                    }
-                    
-                    processed.insert(contact.id)
+
+        // 处理按姓名分组的联系人 — 使用 hash map 替代 O(n²) 嵌套循环
+        for (_, nameGroup) in nameGroups where nameGroup.count > 1 {
+            // 构建 phone/email → contacts 的倒排索引
+            var phoneToContacts: [String: [ContactItem]] = [:]
+            var emailToContacts: [String: [ContactItem]] = [:]
+
+            for contact in nameGroup {
+                for phone in contact.phoneNumbers {
+                    phoneToContacts[normalizeForComparison(phone.value), default: []].append(contact)
                 }
-                
-                groups.append(contentsOf: similarGroups)
+                for email in contact.emailAddresses {
+                    emailToContacts[email.value.lowercased(), default: []].append(contact)
+                }
+            }
+
+            // Union-Find: 共享 phone/email 的联系人归为一组
+            var parent: [String: String] = [:]
+            for c in nameGroup { parent[c.id] = c.id }
+
+            func find(_ x: String) -> String {
+                var root = x
+                while parent[root] != root { root = parent[root]! }
+                var cur = x
+                while cur != root { let next = parent[cur]!; parent[cur] = root; cur = next }
+                return root
+            }
+            func union(_ a: String, _ b: String) {
+                let ra = find(a), rb = find(b)
+                if ra != rb { parent[ra] = rb }
+            }
+
+            for (_, sharedContacts) in phoneToContacts where sharedContacts.count > 1 {
+                for i in 1..<sharedContacts.count {
+                    union(sharedContacts[0].id, sharedContacts[i].id)
+                }
+            }
+            for (_, sharedContacts) in emailToContacts where sharedContacts.count > 1 {
+                for i in 1..<sharedContacts.count {
+                    union(sharedContacts[0].id, sharedContacts[i].id)
+                }
+            }
+
+            // 按 root 分组
+            var clusterMap: [String: [ContactItem]] = [:]
+            for c in nameGroup {
+                clusterMap[find(c.id), default: []].append(c)
+            }
+            for (_, cluster) in clusterMap where cluster.count > 1 {
+                groups.append(DuplicateGroup(contacts: cluster, reason: detectReason(cluster)))
             }
         }
 

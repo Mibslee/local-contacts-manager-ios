@@ -14,6 +14,9 @@ class AppViewModel: ObservableObject {
     @Published var loadingProgress: Double = 0
     @Published var loadedContactsCount: Int = 0
 
+    /// 重复联系人缓存，避免每次打开详情页重新计算
+    private var cachedDuplicateContacts: [ContactItem]?
+
     var filteredContacts: [ContactItem] {
         if searchText.isEmpty { return contacts }
         return contacts.filter {
@@ -53,6 +56,7 @@ class AppViewModel: ObservableObject {
         errorMessage = nil
         loadingProgress = 0
         loadedContactsCount = 0
+        cachedDuplicateContacts = nil
 
         let keysToFetch: [CNKeyDescriptor] = [
             CNContactIdentifierKey as CNKeyDescriptor,
@@ -105,10 +109,12 @@ class AppViewModel: ObservableObject {
             contacts = result.contacts
             // 先设置 isLoading 为 false，让用户看到联系人列表
             isLoading = false
-            // 在主线程中执行健康分析
-            Task {
+            // 后台线程执行健康分析，避免阻塞 UI
+            Task.detached {
                 let report = HealthAnalyzer.analyze(result.contacts)
-                healthReport = report
+                await MainActor.run {
+                    self.healthReport = report
+                }
             }
         }
     }
@@ -120,10 +126,10 @@ class AppViewModel: ObservableObject {
     func contactsForIssue(_ type: HealthReport.IssueType) -> [ContactItem] {
         switch type {
         case .nameNeedsStandardize, .nameNotSplit:
-            return contacts.filter { needsNameFix($0) }
+            return contacts.filter { ContactValidator.needsNameFix($0) }
         case .phonePrefixInconsistent:
             return contacts.filter { c in
-                let prefixes = Set(c.phoneNumbers.map { extractPhonePrefix($0.value) })
+                let prefixes = Set(c.phoneNumbers.map { ContactValidator.extractPhonePrefix($0.value) })
                 return prefixes.count > 1
             }
         case .phoneLabelInconsistent:
@@ -134,7 +140,7 @@ class AppViewModel: ObservableObject {
             return contacts.filter { c in
                 c.phoneNumbers.contains { phone in
                     let digits = phone.value.replacingOccurrences(of: "[^0-9]", with: "", options: .regularExpression)
-                    return !isValidChinesePhone(digits)
+                    return !ContactValidator.isValidChinesePhone(digits)
                 }
             }
         case .emailLabelInconsistent:
@@ -146,36 +152,16 @@ class AppViewModel: ObservableObject {
                 c.emailAddresses.contains { !ContactNormalizer.isValidEmail($0.value) }
             }
         case .contactDuplicate:
-            // 延迟计算重复联系人，避免首次进入时卡顿
+            if let cached = cachedDuplicateContacts { return cached }
             let groups = ContactDeduplicator.findDuplicates(in: contacts)
-            return groups.flatMap { $0.contacts }
+            let result = groups.flatMap { $0.contacts }
+            cachedDuplicateContacts = result
+            return result
         case .emptyContact:
             return contacts.filter { $0.isEmpty }
         }
     }
 
-    private func extractPhonePrefix(_ phone: String) -> String {
-        let cleaned = phone.replacingOccurrences(of: "[^0-9+]", with: "", options: .regularExpression)
-        if cleaned.hasPrefix("+86") { return "+86" }
-        if cleaned.hasPrefix("86") && cleaned.count > 11 { return "86" }
-        return "none"
-    }
-
-    private func needsNameFix(_ contact: ContactItem) -> Bool {
-        if contact.familyName.count > 1 && contact.givenName.isEmpty { return true }
-        if contact.givenName.count > 1 && contact.familyName.isEmpty { return true }
-        if contact.familyName.isEmpty && contact.givenName.isEmpty && !contact.fullName.isEmpty { return true }
-        return false
-    }
-
-    private func isValidChinesePhone(_ digits: String) -> Bool {
-        if digits.isEmpty { return true }
-        let clean = digits.hasPrefix("86") && digits.count > 11 ? String(digits.dropFirst(2)) : digits
-        if clean.count == 11 && clean.hasPrefix("1") { return true }
-        if clean.count >= 7 && clean.count <= 15 { return true }
-        return false
-    }
-    
     func issueTitle(for type: HealthReport.IssueType) -> String {
         return type.rawValue
     }

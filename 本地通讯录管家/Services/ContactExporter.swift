@@ -55,29 +55,58 @@ class ContactExporter {
     }
 
     static func exportToCSV(_ contacts: [ContactItem]) -> String {
-        var csv = ""
-        csv += "姓名,姓,名,手机1,手机1标签,手机2,手机2标签,邮箱1,邮箱1标签,邮箱2,邮箱2标签,公司,部门,备注\n"
+        // 动态确定最大手机号和邮箱数量，避免数据截断
+        let maxPhones = contacts.map(\.phoneNumbers.count).max() ?? 0
+        let maxEmails = contacts.map(\.emailAddresses.count).max() ?? 0
+        let phoneCols = max(1, maxPhones)
+        let emailCols = max(1, maxEmails)
 
+        // 生成表头
+        var headers = ["姓名", "姓", "名"]
+        for i in 1...phoneCols {
+            headers.append("手机\(i)")
+            headers.append("手机\(i)标签")
+        }
+        for i in 1...emailCols {
+            headers.append("邮箱\(i)")
+            headers.append("邮箱\(i)标签")
+        }
+        headers.append(contentsOf: ["公司", "部门", "备注"])
+
+        var csv = headers.joined(separator: ",") + "\n"
+
+        // 生成数据行
         for contact in contacts {
-            let name = escapeCSV(contact.fullName)
-            let family = escapeCSV(contact.familyName)
-            let given = escapeCSV(contact.givenName)
+            var fields: [String] = []
+            fields.append(escapeCSV(contact.fullName))
+            fields.append(escapeCSV(contact.familyName))
+            fields.append(escapeCSV(contact.givenName))
 
-            let phone1 = contact.phoneNumbers.count > 0 ? escapeCSV(contact.phoneNumbers[0].value) : ""
-            let phone1Label = contact.phoneNumbers.count > 0 ? escapeCSV(contact.phoneNumbers[0].label) : ""
-            let phone2 = contact.phoneNumbers.count > 1 ? escapeCSV(contact.phoneNumbers[1].value) : ""
-            let phone2Label = contact.phoneNumbers.count > 1 ? escapeCSV(contact.phoneNumbers[1].label) : ""
+            for i in 0..<phoneCols {
+                if i < contact.phoneNumbers.count {
+                    fields.append(escapeCSV(contact.phoneNumbers[i].value))
+                    fields.append(escapeCSV(contact.phoneNumbers[i].label))
+                } else {
+                    fields.append("")
+                    fields.append("")
+                }
+            }
 
-            let email1 = contact.emailAddresses.count > 0 ? escapeCSV(contact.emailAddresses[0].value) : ""
-            let email1Label = contact.emailAddresses.count > 0 ? escapeCSV(contact.emailAddresses[0].label) : ""
-            let email2 = contact.emailAddresses.count > 1 ? escapeCSV(contact.emailAddresses[1].value) : ""
-            let email2Label = contact.emailAddresses.count > 1 ? escapeCSV(contact.emailAddresses[1].label) : ""
+            for i in 0..<emailCols {
+                if i < contact.emailAddresses.count {
+                    fields.append(escapeCSV(contact.emailAddresses[i].value))
+                    fields.append(escapeCSV(contact.emailAddresses[i].label))
+                } else {
+                    fields.append("")
+                    fields.append("")
+                }
+            }
 
-            let org = escapeCSV(contact.organization)
-            let dept = escapeCSV(contact.department)
-            let note = escapeCSV(contact.note)
+            fields.append(escapeCSV(contact.organization))
+            fields.append(escapeCSV(contact.department))
+            fields.append(escapeCSV(contact.note))
 
-            csv += "\(name),\(family),\(given),\(phone1),\(phone1Label),\(phone2),\(phone2Label),\(email1),\(email1Label),\(email2),\(email2Label),\(org),\(dept),\(note)\n"
+            csv += fields.joined(separator: ",") + "\n"
         }
 
         return csv

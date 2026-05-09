@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 
+@MainActor
 class OperationLogger: ObservableObject {
     static let shared = OperationLogger()
 
@@ -30,13 +31,11 @@ class OperationLogger: ObservableObject {
 
     func log(operation: String, details: String, affectedCount: Int) {
         let entry = LogEntry(operation: operation, details: details, affectedCount: affectedCount)
-        DispatchQueue.main.async {
-            self.logs.insert(entry, at: 0)
-            if self.logs.count > self.maxLogs {
-                self.logs = Array(self.logs.prefix(self.maxLogs))
-            }
-            self.saveLogs()
+        logs.insert(entry, at: 0)
+        if logs.count > maxLogs {
+            logs = Array(logs.prefix(maxLogs))
         }
+        saveLogs()
     }
 
     func clearLogs() {
