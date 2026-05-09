@@ -690,8 +690,12 @@ struct IssueDetailView: View {
             .onAppear {
                 isLoading = true
                 Task {
-                    let contacts = appVM.contactsForIssue(issueType)
-                    displayedContacts = contacts
+                    let allContacts = appVM.contacts
+                    let type = issueType
+                    let filtered = await Task.detached {
+                        filterContactsForIssue(allContacts, type: type)
+                    }.value
+                    displayedContacts = filtered
                     isLoading = false
                 }
             }
@@ -877,5 +881,42 @@ struct StatCard: View {
         .padding(.vertical, 16)
         .background(AppTheme.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: AppTheme.cardRadius))
+    }
+}
+
+// MARK: - 后台线程过滤联系人（避免阻塞主线程）
+
+private func filterContactsForIssue(_ contacts: [ContactItem], type: HealthReport.IssueType) -> [ContactItem] {
+    switch type {
+    case .nameNeedsStandardize, .nameNotSplit:
+        return contacts.filter { ContactValidator.needsNameFix($0) }
+    case .phonePrefixInconsistent:
+        return contacts.filter { c in
+            let prefixes = Set(c.phoneNumbers.map { ContactValidator.extractPhonePrefix($0.value) })
+            return prefixes.count > 1
+        }
+    case .phoneLabelInconsistent:
+        return contacts.filter { Set($0.phoneNumbers.map { $0.label }).count > 1 }
+    case .phoneDuplicate:
+        return contacts.filter { !ContactDeduplicator.findDuplicatePhonesInContact($0).isEmpty }
+    case .phoneGarbled:
+        return contacts.filter { c in
+            c.phoneNumbers.contains { phone in
+                let digits = phone.value.replacingOccurrences(of: "[^0-9]", with: "", options: .regularExpression)
+                return !ContactValidator.isValidChinesePhone(digits)
+            }
+        }
+    case .emailLabelInconsistent:
+        return contacts.filter { Set($0.emailAddresses.map { $0.label }).count > 1 }
+    case .emailDuplicate:
+        return contacts.filter { !ContactDeduplicator.findDuplicateEmailsInContact($0).isEmpty }
+    case .emailInvalid:
+        return contacts.filter { c in
+            c.emailAddresses.contains { !ContactNormalizer.isValidEmail($0.value) }
+        }
+    case .contactDuplicate:
+        return ContactDeduplicator.findDuplicates(in: contacts).flatMap { $0.contacts }
+    case .emptyContact:
+        return contacts.filter { $0.isEmpty }
     }
 }

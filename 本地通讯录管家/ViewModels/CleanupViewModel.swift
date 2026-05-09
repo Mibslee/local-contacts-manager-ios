@@ -297,11 +297,12 @@ class CleanupViewModel: ObservableObject {
         if isWritingBack { return (0, 0) }
         let signature = Self.signature(for: processedContacts)
         if let last = lastWrittenSignature, last == signature {
-            print("跳过重复写入：当前结果已写入过")
+            print("[WriteBack] 跳过重复写入：当前结果已写入过，共 \(processedContacts.count) 位")
             return (processedContacts.count, 0)
         }
 
         guard !processedContacts.isEmpty else {
+            print("[WriteBack] processedContacts 为空，跳过写入")
             isWritingBack = false
             writeBackProgress = 0.0
             return (0, 0)
@@ -310,6 +311,7 @@ class CleanupViewModel: ObservableObject {
         isWritingBack = true
         writeBackProgress = 0.0
         let contactsToWrite = processedContacts
+        print("[WriteBack] 开始写入 \(contactsToWrite.count) 位联系人到系统通讯录")
 
         var successCount = 0
         var failedCount = 0
@@ -339,8 +341,9 @@ class CleanupViewModel: ObservableObject {
                     existingIDs.append(c.identifier)
                 }
             } catch {
-                print("枚举联系人失败: \(error)")
+                print("[WriteBack] 枚举联系人失败: \(error)")
             }
+            print("[WriteBack] 系统现有 \(existingIDs.count) 位联系人，准备删除")
 
             // 2) 批量删除（每批 200，单事务，无 sleep）
             let deleteBatch = 200
@@ -361,7 +364,7 @@ class CleanupViewModel: ObservableObject {
                         }
                         try store.execute(saveReq)
                     } catch {
-                        print("删除批次失败: \(error)")
+                        print("[WriteBack] 删除批次失败: \(error)")
                     }
                     deletedSoFar = end
                     let p = Double(deletedSoFar) / Double(totalDelete) * 0.5
@@ -400,7 +403,7 @@ class CleanupViewModel: ObservableObject {
                     try store.execute(saveReq)
                     added += (end - start)
                 } catch {
-                    print("添加批次失败: \(error)")
+                    print("[WriteBack] 添加批次失败: \(error)")
                     failed += (end - start)
                 }
                 let p = 0.5 + Double(end) / Double(total) * 0.5
@@ -419,7 +422,7 @@ class CleanupViewModel: ObservableObject {
                 self.lastWrittenSignature = signature
             }
         }
-        print("写入完成: 成功 \(successCount), 失败 \(failedCount)")
+        print("[WriteBack] 写入完成: 成功 \(successCount), 失败 \(failedCount), 系统已有\(result.0 - failedCount)条")
         return (successCount, failedCount)
     }
 
