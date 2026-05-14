@@ -42,7 +42,8 @@ struct HealthReport {
         }
     }
 
-    enum IssueType: String {
+    enum IssueType: String, Identifiable {
+        var id: String { rawValue }
         case nameNeedsStandardize = "姓名需标准化"
         case nameNotSplit = "姓名未拆分"
         case phonePrefixInconsistent = "手机号前缀不统一"

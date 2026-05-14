@@ -36,13 +36,29 @@ class HealthAnalyzer {
                 contactsInconsistentPhonePrefix += 1
             }
 
-            let phoneLabels = Set(contact.phoneNumbers.map { $0.label.lowercased() })
-            if phoneLabels.count > 1 {
+            // 正确的检测：先按类型分组，同类型有多种写法才是不统一
+            // 例如 "手机" + "mobile" + "iPhone" 都是移动电话的不同写法 → 标签不统一
+            // 但 "手机" + "家庭" 是不同类型的电话 → 正确，不需要统一
+            let groupedByNormalizedType = Dictionary(grouping: contact.phoneNumbers) {
+                ContactNormalizer.unifyPhoneLabel($0.label)
+            }
+            let hasInconsistentLabels = groupedByNormalizedType.values.contains { phones in
+                let uniqueLabels = Set(phones.map { $0.label })
+                return uniqueLabels.count > 1
+            }
+            if hasInconsistentLabels {
                 contactsInconsistentPhoneLabel += 1
             }
 
-            let emailLabels = Set(contact.emailAddresses.map { $0.label.lowercased() })
-            if emailLabels.count > 1 {
+            // 邮箱标签检测同样修正：先按类型分组，同类型有多种写法才是不统一
+            let emailGroupedByNormalizedType = Dictionary(grouping: contact.emailAddresses) {
+                ContactNormalizer.unifyEmailLabel($0.label)
+            }
+            let hasInconsistentEmailLabels = emailGroupedByNormalizedType.values.contains { emails in
+                let uniqueLabels = Set(emails.map { $0.label })
+                return uniqueLabels.count > 1
+            }
+            if hasInconsistentEmailLabels {
                 contactsInconsistentEmailLabel += 1
             }
 

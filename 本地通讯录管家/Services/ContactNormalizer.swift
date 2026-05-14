@@ -84,8 +84,14 @@ class ContactNormalizer {
 
     nonisolated static func unifyPhoneLabel(_ label: String) -> String {
         let lower = label.lowercased()
-        if lower.contains("mobile") || lower.contains("手机") || lower == "mp" || lower == "tel" || lower.contains("phone") {
+        // 手机相关标签统一为"手机"（但 "main"/"主要" 是主号码标识，不是手机类型，不应归为"手机"）
+        if lower.contains("mobile") || lower.contains("手机") || lower == "mp" || lower == "tel" ||
+           lower.contains("phone") || lower.contains("iphone") || lower.contains("苹果") || lower.isEmpty {
             return "手机"
+        }
+        // 主号码标识单独分类
+        if lower.contains("main") || lower.contains("主要") {
+            return "主号码"
         }
         return label
     }

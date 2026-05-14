@@ -6,6 +6,95 @@ struct SettingsView: View {
     @AppStorage("preservePhonePrefix") private var preservePhonePrefix = false
     @AppStorage("autoBackup") private var autoBackup = true
 
+    @State private var newTagName = ""
+    @State private var showOperationHistory = false
+
+    private var appVersionString: String {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+        return "\(version) (build \(build))"
+    }
+
+    // MARK: - 标签管理
+
+    private var tagManagementSection: some View {
+        settingsGroup(title: "联系人标签", icon: "tag.fill") {
+            HStack {
+                TextField("输入新标签", text: $newTagName)
+                    .font(.subheadline)
+                    .textFieldStyle(.plain)
+                Button("添加") {
+                    let trimmed = newTagName.trimmingCharacters(in: .whitespaces)
+                    guard !trimmed.isEmpty else { return }
+                    TagManager.shared.addTag(trimmed)
+                    newTagName = ""
+                }
+                .font(.caption.bold())
+                .foregroundStyle(.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Color(hex: "4F7DF5"))
+                .clipShape(Capsule())
+                .disabled(newTagName.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+
+            if TagManager.shared.tags.isEmpty {
+                HStack {
+                    Text("暂无标签，输入名称后添加").font(.caption).foregroundStyle(.tertiary)
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
+            } else {
+                ForEach(TagManager.shared.tags, id: \.self) { tag in
+                    HStack {
+                        Image(systemName: "tag.fill").font(.caption2).foregroundStyle(Color(hex: "4F7DF5"))
+                        Text(tag).font(.subheadline)
+                        Spacer()
+                        Button(role: .destructive) {
+                            TagManager.shared.removeTag(tag)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    if tag != TagManager.shared.tags.last { Divider() }
+                }
+            }
+        }
+    }
+
+    // MARK: - 操作历史
+
+    private var operationHistorySection: some View {
+        settingsGroup(title: "操作历史", icon: "clock.arrow.circlepath") {
+            Button {
+                showOperationHistory = true
+            } label: {
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("查看写入历史").font(.subheadline)
+                        Text("回滚到任意历史版本").font(.caption2).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .sheet(isPresented: $showOperationHistory) {
+            OperationHistoryView()
+        }
+    }
+
     var body: some View {
         ScrollView {
             VStack(spacing: AppTheme.sectionSpacing) {
@@ -52,9 +141,15 @@ struct SettingsView: View {
                     settingsToggle(title: "操作前自动备份", isOn: $autoBackup)
                 }
 
+                // 联系人标签
+                tagManagementSection
+
+                // 操作历史
+                operationHistorySection
+
                 // 关于
                 settingsGroup(title: "关于", icon: "info.circle.fill") {
-                    settingsInfoRow(label: "版本", value: "1.0.0")
+                    settingsInfoRow(label: "版本", value: appVersionString)
                     Divider()
                     HStack {
                         Text("数据存储").font(.subheadline)

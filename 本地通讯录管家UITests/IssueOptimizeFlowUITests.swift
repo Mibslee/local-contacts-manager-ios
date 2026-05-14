@@ -6,6 +6,7 @@
 //
 
 import XCTest
+import Contacts
 
 final class IssueOptimizeFlowUITests: XCTestCase {
 
@@ -16,15 +17,90 @@ final class IssueOptimizeFlowUITests: XCTestCase {
         app = XCUIApplication()
         app.launch()
 
+        // 设置权限弹窗监控
         addUIInterruptionMonitor(withDescription: "通讯录权限") { alert in
             for title in ["好", "Allow", "允许", "OK"] {
                 let btn = alert.buttons[title]
                 if btn.exists {
+                    print("[TestSetup] 点击授权按钮: \(title)")
                     btn.tap()
                     return true
                 }
             }
             return false
+        }
+
+        // 等待授权
+        print("[TestSetup] 等待通讯录授权...")
+        _ = element(identifier: "home.requestContactsButton").waitForExistence(timeout: 10)
+        if element(identifier: "home.requestContactsButton").exists {
+            print("[TestSetup] 点击请求授权按钮")
+            element(identifier: "home.requestContactsButton").tap()
+        }
+
+        // 等待授权弹窗并处理
+        Thread.sleep(forTimeInterval: 2)
+
+        // 等待健康分卡片出现（表示授权成功并加载完成）
+        print("[TestSetup] 等待加载完成...")
+        _ = element(identifier: "home.healthScoreCard").waitForExistence(timeout: 60)
+
+        // 添加测试数据（授权后）
+        try? addTestContactsToSimulator()
+
+        // 刷新以加载新添加的测试数据
+        print("[TestSetup] 刷新通讯录...")
+        app.swipeDown()
+        Thread.sleep(forTimeInterval: 2)
+    }
+
+    private func addTestContactsToSimulator() throws {
+        let store = CNContactStore()
+        let status = CNContactStore.authorizationStatus(for: .contacts)
+
+        guard status == .authorized else {
+            print("[TestSetup] 通讯录未授权，跳过添加测试数据")
+            return
+        }
+
+        // 清除旧数据
+        clearAllContacts(store: store)
+
+        // 添加测试联系人：确保有"手机标签不一致"问题
+        let testContacts: [(String, [(String, String)])] = [
+            ("张三", [("手机", "13800138000"), ("工作", "13900139000")]),
+            ("李四", [("手机", "13800138001"), ("iPhone", "13900138001")]),
+            ("王五", [("MP", "13800138002"), ("tel", "13800138003")]),
+            ("赵六", [("手机", "13800138004"), ("手机", "13900138005")]),
+            ("钱七", [("mobile", "13800138006"), ("工作", "13900138006")]),
+        ]
+
+        for (name, phones) in testContacts {
+            let contact = CNMutableContact()
+            contact.givenName = name
+            contact.phoneNumbers = phones.map { CNLabeledValue(label: $0.0, value: CNPhoneNumber(stringValue: $0.1)) }
+
+            let req = CNSaveRequest()
+            req.add(contact, toContainerWithIdentifier: nil)
+            try store.execute(req)
+            print("[TestSetup] 添加测试联系人: \(name)")
+        }
+        print("[TestSetup] 测试数据准备完成")
+    }
+
+    private func clearAllContacts(store: CNContactStore) {
+        let req = CNContactFetchRequest(keysToFetch: [CNContactIdentifierKey as CNKeyDescriptor])
+        do {
+            try store.enumerateContacts(with: req) { contact, _ in
+                if let mutable = contact.mutableCopy() as? CNMutableContact {
+                    let delReq = CNSaveRequest()
+                    delReq.delete(mutable)
+                    try? store.execute(delReq)
+                }
+            }
+            print("[TestSetup] 通讯录已清空")
+        } catch {
+            print("[TestSetup] 清除通讯录失败: \(error)")
         }
     }
 
@@ -37,7 +113,7 @@ final class IssueOptimizeFlowUITests: XCTestCase {
     }
 
     func testIssueDetail_selectAll_preExecute_writeToSystem_fullFlow() throws {
-        guard element(identifier: "home.healthScoreCard").waitForExistence(timeout: 45) else {
+        guard element(identifier: "home.healthScoreCard").waitForExistence(timeout: 60) else {
             throw XCTSkip("需已授权通讯录并加载完成")
         }
 

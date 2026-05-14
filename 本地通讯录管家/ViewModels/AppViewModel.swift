@@ -17,6 +17,22 @@ class AppViewModel: ObservableObject {
     /// 重复联系人缓存，避免每次打开详情页重新计算
     var cachedDuplicateContacts: [ContactItem]?
 
+    /// 当前选中的标签筛选
+    @Published var selectedTag: String?
+
+    /// 所有联系人中出现的唯一标签列表
+    var allTags: [String] {
+        let tagSet = Set(contacts.flatMap { $0.tags })
+        let predefined = TagManager.shared.tags
+        return Array(Set(predefined + tagSet)).sorted()
+    }
+
+    /// 按标签筛选后的联系人
+    var taggedContacts: [ContactItem] {
+        guard let tag = selectedTag else { return contacts }
+        return contacts.filter { $0.tags.contains(tag) }
+    }
+
     var filteredContacts: [ContactItem] {
         if searchText.isEmpty { return contacts }
         return contacts.filter {
@@ -28,30 +44,36 @@ class AppViewModel: ObservableObject {
 
     func checkAuthorization() {
         let status = CNContactStore.authorizationStatus(for: .contacts)
-        isAuthorized = status == .authorized
-        if isAuthorized && contacts.isEmpty {
-            Task { await loadContacts() }
+        let nowAuthorized = (status == .authorized)
+        isAuthorized = isAuthorized || nowAuthorized
+        if nowAuthorized && contacts.isEmpty {
+            loadContactsInBackground()
         }
     }
 
     func requestAccess() async {
-        let store = CNContactStore()
-        do {
-            let granted = try await store.requestAccess(for: .contacts)
-            if granted {
-                isAuthorized = true
-                await loadContacts()
-            } else {
-                isAuthorized = false
-                errorMessage = "通讯录访问被拒绝"
+        let status = CNContactStore.authorizationStatus(for: .contacts)
+        if status == .authorized {
+            isAuthorized = true
+            loadContactsInBackground()
+            return
+        }
+        Task.detached(priority: .userInitiated) { @MainActor in
+            let store = CNContactStore()
+            do {
+                let granted = try await store.requestAccess(for: .contacts)
+                if granted {
+                    self.isAuthorized = true
+                    self.loadContactsInBackground()
+                }
+            } catch {
+                self.isAuthorized = false
             }
-        } catch {
-            isAuthorized = false
-            errorMessage = "通讯录访问失败: \(error.localizedDescription)"
         }
     }
 
-    func loadContacts() async {
+    /// 在后台执行所有加载逻辑
+    private func loadContactsInBackground() {
         isLoading = true
         errorMessage = nil
         loadingProgress = 0
@@ -68,52 +90,96 @@ class AppViewModel: ObservableObject {
             CNContactDepartmentNameKey as CNKeyDescriptor
         ]
 
-        let result: (contacts: [ContactItem], error: String?) = await Task.detached {
+        Task.detached(priority: .userInitiated) { [keys = keysToFetch] in
             let store = CNContactStore()
-            let request = CNContactFetchRequest(keysToFetch: keysToFetch)
+            let request = CNContactFetchRequest(keysToFetch: keys)
             request.sortOrder = .userDefault
             var fetched: [ContactItem] = []
-            var fetchError: String?
-            var count = 0
-
             do {
                 try store.enumerateContacts(with: request) { cnContact, _ in
                     fetched.append(ContactItem(cnContact: cnContact))
-                    count += 1
-                    // 每10个联系人更新一次进度（在主线程上）
-                    if count % 10 == 0 {
-                        let progress = count
-                        Task { @MainActor in
-                            self.loadedContactsCount = progress
-                        }
-                    }
-                }
-                // 枚举完成后，确保最终计数被更新
-                let total = count
-                Task { @MainActor in
-                    self.loadedContactsCount = total
                 }
             } catch {
-                fetchError = "读取通讯录失败: \(error.localizedDescription)"
+                await MainActor.run {
+                    self.errorMessage = "读取通讯录失败: \(error.localizedDescription)"
+                    self.contacts = []
+                    self.healthReport = .empty
+                    self.isLoading = false
+                }
+                return
             }
 
-            return (fetched, fetchError)
-        }.value
+            if fetched.isEmpty {
+                // Auto-import from Documents/original_contacts.vcf
+                do {
+                    let fileManager = FileManager.default
+                    guard let docsDir = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else {
+                        await MainActor.run {
+                            self.contacts = []
+                            self.loadedContactsCount = 0
+                            self.isLoading = false
+                        }
+                        return
+                    }
 
-        if let error = result.error {
-            errorMessage = error
-            contacts = []
-            healthReport = .empty
-            isLoading = false
-        } else {
-            contacts = result.contacts
-            // 先设置 isLoading 为 false，让用户看到联系人列表
-            isLoading = false
-            // 后台线程执行健康分析 + 预计算重复联系人缓存，避免阻塞 UI
-            Task.detached {
-                let report = HealthAnalyzer.analyze(result.contacts)
-                // 预计算重复联系人缓存，避免用户点击时才执行慢速 Union-Find
-                let groups = ContactDeduplicator.findDuplicates(in: result.contacts)
+                    let vcfURL = docsDir.appendingPathComponent("original_contacts.vcf")
+                    guard fileManager.fileExists(atPath: vcfURL.path),
+                          let vcfData = try? Data(contentsOf: vcfURL) else {
+                        await MainActor.run {
+                            self.contacts = []
+                            self.loadedContactsCount = 0
+                            self.isLoading = false
+                        }
+                        return
+                    }
+
+                    let cnParsed = try CNContactVCardSerialization.contacts(with: vcfData)
+                    print("[AutoImport] 解析到 \(cnParsed.count) 个联系人，开始写入...")
+
+                    let saveReq = CNSaveRequest()
+                    for c in cnParsed {
+                        saveReq.add(c.mutableCopy() as! CNMutableContact, toContainerWithIdentifier: nil)
+                    }
+                    try store.execute(saveReq)
+                    print("[AutoImport] 写入成功")
+
+                    // Reload
+                    var reloaded: [ContactItem] = []
+                    let req2 = CNContactFetchRequest(keysToFetch: keys)
+                    req2.sortOrder = .userDefault
+                    try store.enumerateContacts(with: req2) { cnContact, _ in
+                        reloaded.append(ContactItem(cnContact: cnContact))
+                    }
+                    print("[AutoImport] 重新加载: \(reloaded.count)")
+
+                    let report = HealthAnalyzer.analyze(reloaded)
+                    let groups = ContactDeduplicator.findDuplicates(in: reloaded)
+                    let cached = groups.flatMap { $0.contacts }
+
+                    await MainActor.run {
+                        self.contacts = reloaded
+                        self.loadedContactsCount = reloaded.count
+                        self.healthReport = report
+                        self.cachedDuplicateContacts = cached
+                        self.isLoading = false
+                    }
+                } catch {
+                    print("[AutoImport] 失败: \(error)")
+                    await MainActor.run {
+                        self.contacts = []
+                        self.loadedContactsCount = 0
+                        self.isLoading = false
+                    }
+                }
+            } else {
+                await MainActor.run {
+                    self.contacts = fetched
+                    self.loadedContactsCount = fetched.count
+                    self.isLoading = false
+                }
+
+                let report = HealthAnalyzer.analyze(fetched)
+                let groups = ContactDeduplicator.findDuplicates(in: fetched)
                 let cached = groups.flatMap { $0.contacts }
                 await MainActor.run {
                     self.healthReport = report
@@ -124,7 +190,7 @@ class AppViewModel: ObservableObject {
     }
 
     func refresh() async {
-        await loadContacts()
+        loadContactsInBackground()
     }
 
     func contactsForIssue(_ type: HealthReport.IssueType) -> [ContactItem] {

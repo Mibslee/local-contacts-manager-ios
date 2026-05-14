@@ -4,12 +4,12 @@ struct OptimizedHomeView: View {
     @ObservedObject var appVM: AppViewModel
     @StateObject private var cleanupVM = CleanupViewModel()
     @State private var selectedIssueType: HealthReport.IssueType?
-    @State private var showIssueDetail = false
     @State private var showWriteBack = false
     @State private var showRestoreConfirm = false
     @State private var writeBackResult: (success: Int, failed: Int)?
     @State private var showPreExecute = false
     @State private var preExecuteResult: [ContactItem]?
+    @State private var showMergePreview = false
     @State private var selectedContactIDs: Set<ContactItem.ID> = []
     @State private var ignoredIssues: Set<HealthReport.IssueType> = []
     @State private var isProcessing = false
@@ -32,6 +32,9 @@ struct OptimizedHomeView: View {
                         if !filteredIssueItems.isEmpty {
                             quickActionBanner
                         }
+                        if !appVM.allTags.isEmpty {
+                            tagFilterBar
+                        }
                         issuesSection
                         actionSection
                     }
@@ -45,28 +48,59 @@ struct OptimizedHomeView: View {
             .refreshable { await appVM.refresh() }
             .onAppear { appVM.checkAuthorization() }
             .searchable(text: $appVM.searchText, prompt: "搜索联系人")
-            .sheet(isPresented: $showIssueDetail) {
-                if let issueType = selectedIssueType {
-                    IssueDetailView(
-                        title: appVM.issueTitle(for: issueType),
-                        issueType: issueType,
-                        selectedContactIDs: $selectedContactIDs,
-                        onPreExecute: { await preExecute(for: issueType) },
-                        onIgnore: { ignoreIssue(issueType) },
-                        appVM: appVM
-                    )
-                }
+            .fullScreenCover(item: $selectedIssueType) { issueType in
+                IssueDetailView(
+                    title: appVM.issueTitle(for: issueType),
+                    issueType: issueType,
+                    selectedContactIDs: $selectedContactIDs,
+                    onPreExecute: { await preExecute(for: issueType) },
+                    onIgnore: { ignoreIssue(issueType) },
+                    appVM: appVM,
+                    onDismiss: {
+                        selectedIssueType = nil
+                    }
+                )
             }
             .sheet(isPresented: $showPreExecute) {
                 if let result = preExecuteResult {
-                    PreExecuteResultView(contacts: result, onWriteBack: { showWriteBack = true })
+                    PreExecuteRecordedView(
+                        contactCount: result.count,
+                        onDismiss: {
+                            showPreExecute = false
+                        }
+                    )
                 }
+            }
+            .sheet(isPresented: $showMergePreview) {
+                MergePreviewView(
+                    duplicateGroups: cleanupVM.duplicateGroups,
+                    onConfirm: { selectedIds in
+                        cleanupVM.applyMergeSelection(selectedIds)
+                        showMergePreview = false
+                        // 更新预览结果
+                        preExecuteResult = cleanupVM.processedContacts
+                        showPreExecute = true
+                        appVM.contacts = cleanupVM.processedContacts
+                        appVM.healthReport = HealthAnalyzer.analyze(cleanupVM.processedContacts)
+                    },
+                    onSkip: {
+                        // 跳过合并：还原所有重复分组，仅应用其他优化
+                        cleanupVM.applyMergeSelection([])
+                        showMergePreview = false
+                        preExecuteResult = cleanupVM.processedContacts
+                        showPreExecute = true
+                        appVM.contacts = cleanupVM.processedContacts
+                        appVM.healthReport = HealthAnalyzer.analyze(cleanupVM.processedContacts)
+                    }
+                )
             }
             .alert("写入系统通讯录", isPresented: $showWriteBack) {
                 Button("取消", role: .cancel) {}
                 if !cleanupVM.isWritingBack {
                     Button("确认写入", role: .destructive) {
-                        Task { writeBackResult = await cleanupVM.writeBackToSystemDirect() }
+                        Task {
+                            writeBackResult = await cleanupVM.writeSelectedContacts(currentSelectedIDs: selectedContactIDs)
+                        }
                     }
                 }
             } message: {
@@ -80,7 +114,8 @@ struct OptimizedHomeView: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 } else {
-                    Text("将写入 \(cleanupVM.processedContacts.count) 位联系人（已自动备份）")
+                    let count = cleanupVM.hasPendingChanges ? cleanupVM.affectedContacts.count : cleanupVM.processedContacts.count
+                    Text("将写入 \(count) 位联系人（已自动备份）")
                 }
             }
             .alert("写入完成", isPresented: .init(
@@ -89,7 +124,12 @@ struct OptimizedHomeView: View {
             )) {
                 Button("确定") {
                     writeBackResult = nil
-                    Task { try? await Task.sleep(nanoseconds: 500_000_000); await appVM.refresh() }
+                    cleanupVM.clearPendingChanges()
+                    cleanupVM.resetAll()
+                    Task {
+                        try? await Task.sleep(nanoseconds: 500_000_000)
+                        await appVM.refresh()
+                    }
                 }
             } message: {
                 if let r = writeBackResult {
@@ -299,7 +339,6 @@ struct OptimizedHomeView: View {
         Button {
             selectedIssueType = item.issueType
             selectedContactIDs.removeAll()
-            showIssueDetail = true
         } label: {
             HStack(spacing: 14) {
                 // 图标区域
@@ -355,7 +394,51 @@ struct OptimizedHomeView: View {
 
     private var actionSection: some View {
         VStack(spacing: 10) {
-            if cleanupVM.hasBackup {
+            // 待写入修改提示
+            if cleanupVM.hasPendingChanges {
+                Button {
+                    Task {
+                        _ = await cleanupVM.backupContacts(appVM.contacts)
+                        // 注意：不要覆盖 processedContacts，它已经是清理后的数据
+                        cleanupVM.clearWriteSignature()
+                        showWriteBack = true
+                    }
+                } label: {
+                    HStack {
+                        Image(systemName: "arrow.down.to.line.circle.fill")
+                        Text("写入系统通讯录 (\(cleanupVM.pendingChangesCount) 项待写入)")
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                    }
+                    .font(.subheadline.bold())
+                    .foregroundStyle(.white)
+                    .padding(.vertical, 14)
+                    .padding(.horizontal, 16)
+                    .background(Color.orange)
+                    .clipShape(RoundedRectangle(cornerRadius: AppTheme.smallRadius))
+                    .shadow(color: Color.orange.opacity(0.3), radius: 6, x: 0, y: 3)
+                }
+                .accessibilityIdentifier("home.writePendingButton")
+
+                Button {
+                    // 放弃修改
+                    cleanupVM.resetAll()
+                    Task { await appVM.refresh() }
+                } label: {
+                    HStack {
+                        Image(systemName: "xmark.circle")
+                        Text("放弃修改")
+                        Spacer()
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 10)
+                    .padding(.horizontal, 16)
+                }
+            }
+
+            if cleanupVM.hasBackup && !cleanupVM.hasPendingChanges {
                 Button(role: .destructive) { showRestoreConfirm = true } label: {
                     HStack {
                         Image(systemName: "arrow.counterclockwise")
@@ -370,12 +453,15 @@ struct OptimizedHomeView: View {
                 }
             }
 
-            if !filteredIssueItems.isEmpty {
+            // 无待写入时，显示普通写入按钮
+            if !filteredIssueItems.isEmpty && !cleanupVM.hasPendingChanges {
                 Button {
                     Task {
                         _ = await cleanupVM.backupContacts(appVM.contacts)
-                        cleanupVM.processedContacts = appVM.contacts
+                        // 注意：不要覆盖 processedContacts，它已经是清理后的数据
+                        cleanupVM.clearWriteSignature()
                         showWriteBack = true
+                        print("[Home] 首页写入: 使用 \(cleanupVM.processedContacts.count) 位联系人")
                     }
                 } label: {
                     HStack {
@@ -523,6 +609,42 @@ struct OptimizedHomeView: View {
         .padding(.top, 40)
     }
 
+    // MARK: - 标签筛选栏
+
+    private var tagFilterBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                tagChip(tag: nil, label: "全部", isSelected: appVM.selectedTag == nil)
+                ForEach(appVM.allTags, id: \.self) { tag in
+                    tagChip(tag: tag, label: tag, isSelected: appVM.selectedTag == tag)
+                }
+            }
+            .padding(.horizontal, 2)
+        }
+        .accessibilityIdentifier("home.tagFilter")
+    }
+
+    private func tagChip(tag: String?, label: String, isSelected: Bool) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                appVM.selectedTag = tag
+            }
+        } label: {
+            HStack(spacing: 4) {
+                if tag != nil {
+                    Image(systemName: "tag.fill").font(.caption2)
+                }
+                Text(label).font(.caption.bold())
+            }
+            .foregroundStyle(isSelected ? .white : Color(hex: "4F7DF5"))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(isSelected ? Color(hex: "4F7DF5") : Color(hex: "4F7DF5").opacity(0.1))
+            .clipShape(Capsule())
+        }
+        .accessibilityIdentifier(tag.map { "home.tag.\($0)" } ?? "home.tag.all")
+    }
+
     // MARK: - 辅助
 
     private var filteredIssueItems: [HealthReport.IssueItem] {
@@ -546,25 +668,53 @@ struct OptimizedHomeView: View {
         let selectedIDs = selectedContactIDs
         let allContacts = appVM.contacts
         cleanupVM.excludedContactIDs = Set(allContacts.map { $0.id }).subtracting(selectedIDs)
-        let processed = await cleanupVM.runCleanup(on: allContacts)
-        await MainActor.run {
-            updateContacts(with: processed)
-            isProcessing = false
-            preExecuteResult = processed
-            showIssueDetail = false
+
+        // 使用 recordChanges 而不是 runCleanup，只记录修改不写入
+        await cleanupVM.performCleanupAndRecord(on: allContacts)
+
+        // 写入时只写用户选中的联系人（而非所有处理过的联系人）
+        cleanupVM.selectedContactIDsAtPreExecute = selectedIDs
+
+        // 更新 appVM.contacts 和 appVM.healthReport（健康分析移到后台避免阻塞 UI）
+        let processedContacts = cleanupVM.processedContacts
+        Task.detached {
+            let newReport = HealthAnalyzer.analyze(processedContacts)
+            await MainActor.run {
+                appVM.contacts = processedContacts
+                appVM.healthReport = newReport
+                appVM.cachedDuplicateContacts = nil
+                isProcessing = false
+                preExecuteResult = processedContacts
+                selectedIssueType = nil
+
+                // 重复联系人展示合并预览
+                if issueType == .contactDuplicate && !cleanupVM.duplicateGroups.isEmpty {
+                    showMergePreview = true
+                } else {
+                    showPreExecute = true
+                }
+                print("[Home] 预执行完成: 已更新健康报告")
+            }
         }
-        try? await Task.sleep(nanoseconds: 600_000_000)
-        await MainActor.run { showPreExecute = true }
     }
 
-    private func updateContacts(with processedContacts: [ContactItem]) {
-        appVM.contacts = processedContacts
-        appVM.healthReport = HealthAnalyzer.analyze(processedContacts)
+    /// 预执行完成后应用修改到本地（显示预览效果，但标记为待写入）
+    private func applyPendingChanges() {
+        appVM.contacts = cleanupVM.processedContacts
+        appVM.healthReport = HealthAnalyzer.analyze(cleanupVM.processedContacts)
+        appVM.cachedDuplicateContacts = nil
+        print("[Home] 应用待写入修改: \(cleanupVM.processedContacts.count) 位")
+    }
+
+    /// 放弃所有待写入的修改
+    private func discardPendingChanges() {
+        cleanupVM.resetAll()
+        Task { await appVM.refresh() }
     }
 
     private func ignoreIssue(_ issueType: HealthReport.IssueType) {
         ignoredIssues.insert(issueType)
-        showIssueDetail = false
+        selectedIssueType = nil
     }
 }
 
@@ -577,10 +727,24 @@ struct IssueDetailView: View {
     let onPreExecute: () async -> Void
     let onIgnore: () -> Void
     @ObservedObject var appVM: AppViewModel
+    var onDismiss: (() -> Void)?
 
     @State private var searchText = ""
-    @State private var isLoading = true
-    @State private var displayedContacts: [ContactItem] = []
+    @State private var loadState: LoadState = .loading
+
+    enum LoadState {
+        case loading
+        case loaded([ContactItem])
+        case empty
+        case error(String)
+    }
+
+    private var displayedContacts: [ContactItem] {
+        if case .loaded(let contacts) = loadState {
+            return contacts
+        }
+        return []
+    }
 
     var filteredContacts: [ContactItem] {
         if searchText.isEmpty { return displayedContacts }
@@ -594,123 +758,148 @@ struct IssueDetailView: View {
         NavigationStack {
             ZStack {
                 AppTheme.pageBackground.ignoresSafeArea()
-                if !isLoading {
-                    ScrollView {
-                        LazyVStack(spacing: 0) {
-                            // 顶部摘要
-                            HStack(spacing: 10) {
-                                Image(systemName: "info.circle.fill")
-                                    .foregroundStyle(.blue)
-                                Text("\(displayedContacts.count) 位联系人存在「\(title)」问题")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                                Spacer()
-                                Button(action: toggleSelectAll) {
-                                    Text(selectedContactIDs.count == filteredContacts.count ? "取消全选" : "全选")
-                                        .font(.caption.bold())
-                                        .foregroundStyle(.blue)
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 5)
-                                        .background(Color.blue.opacity(0.1))
-                                        .clipShape(Capsule())
-                                }
-                                .accessibilityIdentifier("issue.detail.selectAll")
-                            }
-                            .padding(.horizontal)
-                            .padding(.vertical, 12)
 
-                            if filteredContacts.isEmpty {
-                                VStack(spacing: 12) {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .font(.system(size: 48)).foregroundStyle(.green)
-                                    Text("没有找到需要处理的联系人")
-                                        .font(.subheadline).foregroundStyle(.secondary)
-                                }
-                                .padding(.vertical, 40).frame(maxWidth: .infinity)
-                            } else {
-                                ForEach(filteredContacts) { contact in
-                                    contactRow(contact)
-                                }
-                            }
-
-                            // 底部操作按钮
-                            VStack(spacing: 10) {
-                                Button {
-                                    Task {
-                                        isLoading = true
-                                        await onPreExecute()
-                                        try? await Task.sleep(nanoseconds: 500_000_000)
-                                        isLoading = false
-                                    }
-                                } label: {
-                                    HStack {
-                                        if isLoading {
-                                            ProgressView().tint(.white).scaleEffect(0.8)
-                                        } else {
-                                            Image(systemName: "play.circle.fill")
-                                        }
-                                        Text("预执行优化")
-                                    }
-                                    .font(.subheadline.bold())
-                                    .foregroundStyle(.white)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 14)
-                                    .background(AppTheme.primaryGradient)
-                                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                                }
-                                .disabled(isLoading)
-                                .accessibilityIdentifier("issue.detail.preExecute")
-
-                                Button(action: onIgnore) {
-                                    HStack {
-                                        Image(systemName: "eye.slash.fill")
-                                        Text("忽略此问题")
-                                    }
-                                    .font(.subheadline)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 12)
-                                    .background(AppTheme.cardBackground)
-                                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                                }
-                                .accessibilityIdentifier("issue.detail.ignore")
-                            }
-                            .padding()
-                        }
-                    }
-                    .accessibilityIdentifier("issue.detail.scroll")
-                    .navigationTitle(title)
-                    .navigationBarTitleDisplayMode(.inline)
-                    .searchable(text: $searchText, prompt: "搜索联系人")
-                }
-
-                if isLoading {
-                    loadingOverlay
-                }
+                // 直接渲染内容，不使用 opacity 动画
+                mainContent
             }
-            .onAppear {
-                // contactDuplicate 有预计算缓存，直接读取即可
-                if issueType == .contactDuplicate, let cached = appVM.cachedDuplicateContacts {
-                    displayedContacts = cached
-                    isLoading = false
-                    return
-                }
-                isLoading = true
-                Task {
-                    let allContacts = appVM.contacts
-                    let type = issueType
-                    let filtered = await Task.detached {
-                        filterContactsForIssue(allContacts, type: type)
-                    }.value
-                    // 缓存 contactDuplicate 结果
-                    if type == .contactDuplicate {
-                        await MainActor.run { appVM.cachedDuplicateContacts = filtered }
-                    }
-                    displayedContacts = filtered
-                    isLoading = false
-                }
+            .task {
+                print("[IssueDetail] .task 开始加载: issueType=\(issueType.rawValue), appVM.contacts=\(appVM.contacts.count)")
+                await loadContacts()
+            }
+            .onDisappear {
+                print("[IssueDetail] onDisappear")
+                onDismiss?()
             }
             .accessibilityIdentifier("issue.detail.root")
         }
+    }
+
+    @ViewBuilder
+    private var mainContent: some View {
+        switch loadState {
+        case .loading:
+            loadingOverlay
+
+        case .loaded(let contacts) where contacts.isEmpty:
+            emptyStateView
+
+        case .loaded:
+            contactListView
+
+        case .empty:
+            emptyStateView
+
+        case .error(let message):
+            errorView(message: message)
+        }
+    }
+
+    private var contactListView: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    // 顶部摘要
+                    HStack(spacing: 10) {
+                        Image(systemName: "info.circle.fill")
+                            .foregroundStyle(.blue)
+                        Text("\(displayedContacts.count) 位联系人存在「\(title)」问题")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button(action: toggleSelectAll) {
+                            Text(selectedContactIDs.count == filteredContacts.count ? "取消全选" : "全选")
+                                .font(.caption.bold())
+                                .foregroundStyle(.blue)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 5)
+                                .background(Color.blue.opacity(0.1))
+                                .clipShape(Capsule())
+                        }
+                        .accessibilityIdentifier("issue.detail.selectAll")
+                    }
+                    .padding(.horizontal)
+                    .padding(.vertical, 12)
+
+                    ForEach(filteredContacts) { contact in
+                        contactRow(contact)
+                    }
+                }
+            }
+            .accessibilityIdentifier("issue.detail.scroll")
+
+            // 底部操作按钮（固定在屏幕底部）
+            VStack(spacing: 10) {
+                Button {
+                    Task { @MainActor in
+                        await onPreExecute()
+                    }
+                } label: {
+                    HStack {
+                        Image(systemName: "play.circle.fill")
+                        Text("预执行优化")
+                    }
+                    .font(.subheadline.bold())
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(AppTheme.primaryGradient)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                .accessibilityIdentifier("issue.detail.preExecute")
+
+                Button(action: onIgnore) {
+                    HStack {
+                        Image(systemName: "eye.slash.fill")
+                        Text("忽略此问题")
+                    }
+                    .font(.subheadline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(AppTheme.cardBackground)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                .accessibilityIdentifier("issue.detail.ignore")
+            }
+            .padding()
+        }
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+        .searchable(text: $searchText, prompt: "搜索联系人")
+    }
+
+    private var emptyStateView: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 48))
+                .foregroundStyle(.green)
+            Text("没有找到需要处理的联系人")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func errorView(message: String) -> some View {
+        VStack(spacing: 16) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 48))
+                .foregroundStyle(.red)
+            Text(message)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var loadingOverlay: some View {
+        VStack(spacing: 16) {
+            ProgressView().scaleEffect(1.5).tint(.blue)
+            Text("正在建立索引...")
+                .font(.subheadline).foregroundStyle(.primary)
+            Text("请稍候，正在分析联系人数据")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(32)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 20))
     }
 
     private func contactRow(_ contact: ContactItem) -> some View {
@@ -721,8 +910,6 @@ struct IssueDetailView: View {
                     .font(.system(size: 22))
             }
 
-            // 头像
-            let _ = avatarColor(for: contact)
             Text(String(contact.initials))
                 .font(.caption.bold())
                 .foregroundStyle(.white)
@@ -759,21 +946,6 @@ struct IssueDetailView: View {
         return colors[hash % colors.count]
     }
 
-    private var loadingOverlay: some View {
-        ZStack {
-            AppTheme.pageBackground.opacity(0.95).ignoresSafeArea()
-            VStack(spacing: 16) {
-                ProgressView().scaleEffect(1.5).tint(.blue)
-                Text("正在建立索引...")
-                    .font(.subheadline).foregroundStyle(.primary)
-                Text("请稍候，正在分析联系人数据")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            .padding(32).background(.ultraThinMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 20))
-        }
-    }
-
     private func toggleSelectAll() {
         if selectedContactIDs.count == filteredContacts.count {
             selectedContactIDs.removeAll()
@@ -788,6 +960,74 @@ struct IssueDetailView: View {
         } else {
             selectedContactIDs.insert(contact.id)
         }
+    }
+
+    private func loadContacts() async {
+        print("[IssueDetail] loadContacts: issueType=\(issueType.rawValue), appVM.contacts=\(appVM.contacts.count)")
+
+        // contactDuplicate 有预计算缓存
+        if issueType == .contactDuplicate, let cached = appVM.cachedDuplicateContacts {
+            print("[IssueDetail] 使用缓存的重复联系人: \(cached.count) 位")
+            loadState = .loaded(cached)
+            return
+        }
+
+        let allContacts = appVM.contacts
+        print("[IssueDetail] 开始过滤: 联系人总数=\(allContacts.count)")
+
+        // 过滤操作
+        var filtered: [ContactItem] = []
+        switch issueType {
+        case .nameNeedsStandardize, .nameNotSplit:
+            filtered = allContacts.filter { ContactValidator.needsNameFix($0) }
+        case .phonePrefixInconsistent:
+            filtered = allContacts.filter { c in
+                let prefixes = Set(c.phoneNumbers.map { ContactValidator.extractPhonePrefix($0.value) })
+                return prefixes.count > 1
+            }
+        case .phoneLabelInconsistent:
+            // 使用与 HealthAnalyzer 相同的逻辑：同类型有多种写法才是不统一
+            filtered = allContacts.filter { contact in
+                let grouped = Dictionary(grouping: contact.phoneNumbers) {
+                    ContactNormalizer.unifyPhoneLabel($0.label)
+                }
+                return grouped.values.contains { phones in
+                    Set(phones.map { $0.label }).count > 1
+                }
+            }
+        case .phoneDuplicate:
+            filtered = allContacts.filter { !ContactDeduplicator.findDuplicatePhonesInContact($0).isEmpty }
+        case .phoneGarbled:
+            filtered = allContacts.filter { c in
+                c.phoneNumbers.contains { phone in
+                    let digits = phone.value.replacingOccurrences(of: "[^0-9]", with: "", options: .regularExpression)
+                    return !ContactValidator.isValidChinesePhone(digits)
+                }
+            }
+        case .emailLabelInconsistent:
+            // 使用与 HealthAnalyzer 相同的逻辑：同类型有多种写法才是不统一
+            filtered = allContacts.filter { contact in
+                let grouped = Dictionary(grouping: contact.emailAddresses) {
+                    ContactNormalizer.unifyEmailLabel($0.label)
+                }
+                return grouped.values.contains { emails in
+                    Set(emails.map { $0.label }).count > 1
+                }
+            }
+        case .emailDuplicate:
+            filtered = allContacts.filter { !ContactDeduplicator.findDuplicateEmailsInContact($0).isEmpty }
+        case .emailInvalid:
+            filtered = allContacts.filter { c in
+                c.emailAddresses.contains { !ContactNormalizer.isValidEmail($0.value) }
+            }
+        case .contactDuplicate:
+            filtered = ContactDeduplicator.findDuplicates(in: allContacts).flatMap { $0.contacts }
+        case .emptyContact:
+            filtered = allContacts.filter { $0.isEmpty }
+        }
+
+        print("[IssueDetail] 过滤完成: 结果数=\(filtered.count)")
+        loadState = .loaded(filtered)
     }
 
     @ViewBuilder
@@ -825,51 +1065,87 @@ struct IssueDetailView: View {
     }
 }
 
-// MARK: - 预执行结果页
+// MARK: - 预执行结果页（统一写入模式）
 
-struct PreExecuteResultView: View {
-    let contacts: [ContactItem]
-    let onWriteBack: () -> Void
+struct PreExecuteRecordedView: View {
+    let contactCount: Int
+    let onDismiss: () -> Void
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 20) {
-                    // 成功图标
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 56))
-                        .foregroundStyle(AppTheme.successGradient)
+            VStack(spacing: 24) {
+                Spacer()
 
-                    Text("预执行结果")
-                        .font(.title3.bold())
+                // 成功图标
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 72))
+                    .foregroundStyle(Color.green)
 
-                    Text("已处理 \(contacts.count) 位联系人")
+                Text("修改已记录")
+                    .font(.title2.bold())
+
+                VStack(spacing: 8) {
+                    Text("已处理 \(contactCount) 位联系人")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
 
-                    Button(action: onWriteBack) {
-                        HStack {
-                            Image(systemName: "arrow.down.to.line.circle.fill")
-                            Text("写入系统通讯录")
-                        }
+                    Text("修改已暂存，请返回首页点击")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+
+                    Text("「写入系统通讯录」")
                         .font(.subheadline.bold())
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.orange.opacity(0.1))
+                        .clipShape(Capsule())
+                }
+
+                VStack(spacing: 12) {
+                    Button(action: onDismiss) {
+                        HStack {
+                            Image(systemName: "arrow.left.circle.fill")
+                            Text("继续处理其他问题")
+                        }
+                        .font(.subheadline)
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
                         .background(AppTheme.primaryGradient)
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                     }
-                    .accessibilityIdentifier("preexecute.writeSystem")
-                    .padding()
+                    .accessibilityIdentifier("preexecute.continueButton")
+
+                    Button(action: onDismiss) {
+                        HStack {
+                            Image(systemName: "checkmark.circle")
+                            Text("知道了")
+                        }
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                    }
+                    .accessibilityIdentifier("preexecute.dismissButton")
                 }
-                .padding(.top, 20)
+                .padding(.horizontal, 24)
+
+                Spacer()
             }
+            .padding(.top, 40)
             .background(AppTheme.pageBackground)
-            .accessibilityIdentifier("preexecute.result.scroll")
             .navigationTitle("预执行结果")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") {
+                        onDismiss()
+                    }
+                }
+            }
         }
-        .accessibilityIdentifier("preexecute.result.root")
+        .accessibilityIdentifier("preexecute.recorded.root")
     }
 }
 
